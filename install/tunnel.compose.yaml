@@ -1,0 +1,11 @@
+name: hearsay-tunnel
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: hearsay-tunnel
+    command: tunnel --no-autoupdate run
+    # Host network so the tunnel reaches the receiver on 127.0.0.1:8787.
+    network_mode: host
+    env_file: /mnt/storage/hearsay/config/tunnel.env
+    restart: unless-stopped

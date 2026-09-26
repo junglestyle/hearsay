@@ -1,0 +1,16 @@
+name: hearsay
+
+services:
+  receiver:
+    build: ..
+    container_name: hearsay
+    user: "568:568"
+    env_file: /mnt/storage/hearsay/config/receiver.env
+    environment:
+      HEARSAY_RAW_DIR: /data/raw
+    volumes:
+      - /mnt/storage/hearsay/raw:/data/raw
+    # Loopback only: the public path is Cloudflare Tunnel (install/tunnel.sh).
+    ports:
+      - "127.0.0.1:8787:8000"
+    restart: unless-stopped
