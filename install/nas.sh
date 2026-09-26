@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TrueNAS SCALE: datasets, receiver secret, receiver container.
+# TrueNAS SCALE: datasets, receiver secret, images, receiver container.
 # Run as root from the cloned repo. Safe to re-run; also how updates are deployed.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
@@ -14,7 +14,7 @@ fi
 
 say "Datasets under $NAS_POOL_DATASET"
 # midclt (not raw zfs) so the TrueNAS UI knows about them.
-for ds in "$NAS_POOL_DATASET" "$NAS_POOL_DATASET/config" "$NAS_POOL_DATASET/raw"; do
+for ds in "$NAS_POOL_DATASET" "$NAS_POOL_DATASET/config" "$NAS_POOL_DATASET/raw" "$NAS_POOL_DATASET/db"; do
     if zfs list -H -o name "$ds" >/dev/null 2>&1; then
         echo "exists: $ds"
     else
@@ -22,20 +22,30 @@ for ds in "$NAS_POOL_DATASET" "$NAS_POOL_DATASET/config" "$NAS_POOL_DATASET/raw"
         echo "created: $ds"
     fi
 done
-[ -d "$NAS_RAW" ] && [ -d "$NAS_CONFIG" ] || die "datasets not mounted under $NAS_ROOT"
+[ -d "$NAS_RAW" ] && [ -d "$NAS_CONFIG" ] && [ -d "$NAS_DB" ] || die "datasets not mounted under $NAS_ROOT"
 
 chown root:root "$NAS_CONFIG"
 chmod 700 "$NAS_CONFIG"
 chown "$APPS_UID:$APPS_GID" "$NAS_RAW"
 chmod 750 "$NAS_RAW"
+# Parsed transcripts: same sensitivity as raw. Apps group can read it.
+chown "$APPS_UID:$APPS_GID" "$NAS_DB"
+chmod 750 "$NAS_DB"
 
 say "Receiver secret in $NAS_RECEIVER_ENV"
 env_ensure "$NAS_RECEIVER_ENV" HEARSAY_SECRET "$(openssl rand -hex 32)"
 
+say "Building images"
+# --profile tools also builds the one-shot check image; parse reuses the receiver's.
+docker compose -f "$REPO_DIR/install/compose.yaml" --profile tools build
+
 say "Starting receiver"
-docker compose -f "$REPO_DIR/install/compose.yaml" up -d --build
+docker compose -f "$REPO_DIR/install/compose.yaml" up -d
 
 say "Verifying receiver rejects unauthenticated requests"
 wait_for_401 "http://127.0.0.1:$NAS_RECEIVER_PORT/omi/transcript" 30
+
+say "Checking that every captured payload parses"
+docker compose -f "$REPO_DIR/install/compose.yaml" run --rm check
 
 say "Receiver is up on 127.0.0.1:$NAS_RECEIVER_PORT. Next: install/tunnel.sh"

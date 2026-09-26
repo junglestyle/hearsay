@@ -1,0 +1,37 @@
+{
+  "segments": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "text": "The",
+      "speaker": "SPEAKER_00",
+      "speaker_id": 0,
+      "is_user": false,
+      "person_id": null,
+      "start": -4e-07,
+      "end": 0.06,
+      "translations": [],
+      "speech_profile_processed": true,
+      "stt_provider": "soniox",
+      "speaker_match_source": null,
+      "speaker_id_scope": "0000000000000000000000000000aaaa:0",
+      "speaker_identity_status": "unknown"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "text": " quick",
+      "speaker": "SPEAKER_00",
+      "speaker_id": 0,
+      "is_user": false,
+      "person_id": null,
+      "start": 0.12,
+      "end": 0.3,
+      "translations": [],
+      "speech_profile_processed": true,
+      "stt_provider": "soniox",
+      "speaker_match_source": null,
+      "speaker_id_scope": "0000000000000000000000000000aaaa:0",
+      "speaker_identity_status": "unknown"
+    }
+  ],
+  "session_id": "test-uid"
+}

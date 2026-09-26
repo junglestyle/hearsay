@@ -7,6 +7,7 @@ NAS_POOL_DATASET="storage/hearsay"
 NAS_ROOT="/mnt/storage/hearsay"
 NAS_CONFIG="$NAS_ROOT/config"
 NAS_RAW="$NAS_ROOT/raw"
+NAS_DB="$NAS_ROOT/db"
 NAS_RECEIVER_ENV="$NAS_CONFIG/receiver.env"
 NAS_TUNNEL_ENV="$NAS_CONFIG/tunnel.env"
 NAS_RECEIVER_PORT=8787

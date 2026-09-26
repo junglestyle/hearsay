@@ -28,10 +28,17 @@ Downstream consumers read this. They never receive audio.
 
 ## Current slice
 
-Slice 1: webhook receiver. FastAPI endpoint that validates a shared secret
-and writes every request body verbatim to disk with a timestamp and webhook
-type. No parsing, no schema, no database. Done when real Omi webhooks are
-landing on the NAS.
+Slice 2: parse from reality. `hearsay/parse.py` rebuilds a SQLite database
+from raw payloads in one command; every run is a full rebuild, and raw is
+never written. Store only what payloads state: no merging of live transcript
+fragments, no inferring conversations. Omi's summary content (`structured`
+in memory payloads) is not parsed. Audio records only sample rate and receipt
+metadata; assembly is slice 3.
+
+Test fixtures are synthetic and committed. Real captures contain other
+people's speech and never enter the repo; the one test that reads them runs
+on the NAS and skips elsewhere. Done when every captured payload type parses
+and a full reprocess from raw is one command.
 
 ## Engineering style
 

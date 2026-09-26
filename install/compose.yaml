@@ -3,6 +3,7 @@ name: hearsay
 services:
   receiver:
     build: ..
+    image: hearsay
     container_name: hearsay
     user: "568:568"
     env_file: /mnt/storage/hearsay/config/receiver.env
@@ -14,3 +15,34 @@ services:
     ports:
       - "127.0.0.1:8787:8000"
     restart: unless-stopped
+
+  # One-shot, not started by `up`: rebuilds the database from raw.
+  # Uses the receiver's image, which install/nas.sh builds.
+  parse:
+    image: hearsay
+    pull_policy: never
+    profiles: [tools]
+    user: "568:568"
+    network_mode: none
+    environment:
+      HEARSAY_RAW_DIR: /data/raw
+      HEARSAY_DB: /data/db/hearsay.sqlite
+    volumes:
+      - /mnt/storage/hearsay/raw:/data/raw:ro
+      - /mnt/storage/hearsay/db:/data/db
+    command: ["python", "-m", "hearsay.parse"]
+
+  # One-shot: the test suite, including the check that every real capture parses.
+  check:
+    build:
+      context: ..
+      target: test
+    image: hearsay-test
+    profiles: [tools]
+    user: "568:568"
+    network_mode: none
+    environment:
+      HEARSAY_CHECK_RAW_DIR: /data/raw
+    volumes:
+      - /mnt/storage/hearsay/raw:/data/raw:ro
+    command: ["pytest", "-q", "-p", "no:cacheprovider", "/tests"]
