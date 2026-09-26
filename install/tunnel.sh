@@ -46,13 +46,13 @@ wait_for_401 "https://$HOST/omi/transcript" 60
 # Manual: the webhook URLs are set in the Omi app on the operator's phone.
 say "Point Omi at the receiver"
 cat <<EOF
-In the Omi app: Settings -> Developer Mode (enable) -> Developer Settings.
-Set these webhook URLs and make sure each is enabled:
+In the Omi app: Settings -> Developer Settings. For each webhook below, paste
+the full URL (path and token included) into its "Endpoint URL" and turn it on:
 
-  Real-time Transcript:        https://$HOST/omi/transcript?token=$SECRET
-  Audio Bytes:                 https://$HOST/omi/audio?token=$SECRET
-    Interval (seconds):        5
-  Conversation/Memory Created: https://$HOST/omi/memory?token=$SECRET
+  Conversation Events:  https://$HOST/omi/memory?token=$SECRET
+  Real-time Transcript: https://$HOST/omi/transcript?token=$SECRET
+  Audio Bytes:          https://$HOST/omi/audio?token=$SECRET
+    (if an interval field is shown, use 5)
 
 These URLs contain the secret. Don't paste them anywhere else.
 EOF
@@ -82,8 +82,10 @@ wait_for_payload transcript "$marker" 300 || ok=false
 wait_for_payload audio "$marker" 60 || ok=false
 
 echo
-echo "Now in the Omi app, open any memory -> ⋮ -> Developer Tools -> Trigger webhook."
-wait_for_payload memory "$marker" 300 || ok=false
+# Conversation events fire only after a conversation ends and Omi processes it.
+echo "Now end the conversation: stop it in the Omi app, or stay silent for a few minutes."
+echo "Waiting up to 10 minutes..."
+wait_for_payload memory "$marker" 600 || ok=false
 
 if [ "$ok" = true ]; then
     say "All three webhook types are landing in $NAS_RAW"
