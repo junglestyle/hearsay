@@ -47,7 +47,48 @@ retroactively to all past utterances.
 
 Done when: tagging a speaker once relabels their past conversations.
 
-## 6. Retention
+## 6. Local transcription (WhisperX)
+
+Transcribe and diarize each conversation's assembled audio with WhisperX
+on the dev box GPU (inside the boundary), replacing Omi's text and speaker
+turns. Word timestamps come from our own audio, so alignment is exact by
+construction. Speaker labeling and clustering run on WhisperX's turns.
+Carry existing ear labels and names across (e.g. by time overlap with the
+Omi segments they were made on), so no operator input is lost.
+
+Done when: every conversation's utterances come from our own transcription,
+and past labels and names still apply.
+
+## 7. Own conversation boundaries
+
+Split the continuous audio stream into conversations ourselves (speech
+and silence), instead of waiting for Omi's memory payloads. After this,
+Omi is only a pipe for audio: its transcript and memory webhooks are no
+longer needed.
+
+Done when: conversations are found without any Omi transcript or memory
+payload, including ones Omi never sent.
+
+## 8. Utterance stream
+
+Expose the utterance stream (conversation_id, timestamps, speaker, text,
+confidence) for downstream consumers. Idea Machine is the first one.
+Comes after slices 6 and 7 because both change where every field comes
+from, and conversation ids change with slice 7.
+
+Done when: a downstream consumer reads utterances without touching audio
+or Hearsay's internals.
+
+## 9. Own capture app
+
+A pared-down app, built from Omi's open-source app (check the license of
+what's reused): pendant over BLE, straight to Hearsay over the tailnet.
+No Omi cloud, no upsells. Replaces the webhook path.
+
+Done when: a day of capture reaches Hearsay with Omi's cloud out of the
+loop.
+
+## 10. Retention
 
 Delete non-owner audio after embedding and transcription. Starts only
 once tagging is reliable: until then all audio is kept, because deleted
@@ -56,15 +97,3 @@ audio can't be re-embedded or re-tagged. First resolve how this fits
 
 Done when: non-owner audio is actually gone from disk, and nothing that
 depends on it breaks.
-
-## After slice 6
-
-Expose the utterance stream (conversation_id, timestamps, speaker,
-text, confidence) for downstream consumers. Idea Machine is the first
-one.
-
-## Maybe later
-
-- Re-transcribe with our own ASR if Omi's is weak
-- Replace webhooks with direct BLE capture from the pendant
-- Self-hosted capture path so audio never touches Omi's cloud

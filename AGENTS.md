@@ -49,7 +49,7 @@ step of reprocess, and applies the operator's names.
 - "Mixed" answers and people spread over clusters (shown by
   `python -m hearsay.label report`) tune CLUSTER_THRESHOLD.
 - Retention is not part of this slice. All audio is kept until tagging is
-  reliable (roadmap slice 6).
+  reliable (roadmap slice 10).
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
 Done when tagging a speaker once relabels their past conversations.
