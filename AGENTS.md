@@ -18,7 +18,9 @@ Downstream consumers read this. They never receive audio.
 
 - Raw webhook payloads are written to disk verbatim before any parsing.
   Never modify or delete raw payloads as part of processing.
-- Audio never leaves Hearsay.
+- Audio never leaves Hearsay. Hearsay's boundary is the operator's own
+  machines: the NAS and the dev box (which has the GPU). Audio may move
+  between them; it never goes to third-party services or downstream consumers.
 - Non-owner audio is deleted after embedding and transcription, per retention
   policy. Owner audio may be kept.
 - Speaker embeddings are retained indefinitely; tagging and merging must be
