@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TrueNAS SCALE: datasets, receiver secret, images, receiver container.
+# TrueNAS SCALE: datasets, secrets, images, receiver and portal containers.
 # Run as root from the cloned repo. Safe to re-run; also how updates are deployed.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
@@ -41,6 +41,23 @@ chmod 2770 "$NAS_LABELS"
 say "Receiver secret in $NAS_RECEIVER_ENV"
 env_ensure "$NAS_RECEIVER_ENV" HEARSAY_SECRET "$(openssl rand -hex 32)"
 
+say "Portal login in $NAS_PORTAL_ENV"
+env_ensure "$NAS_PORTAL_ENV" HEARSAY_PORTAL_USER hearsay
+env_ensure "$NAS_PORTAL_ENV" HEARSAY_PORTAL_PASSWORD "$(openssl rand -base64 24 | tr -d '/+=')"
+env_ensure "$NAS_PORTAL_ENV" HEARSAY_SESSION_KEY "$(openssl rand -hex 32)"
+
+say "Portal addresses (LAN and tailnet only)"
+# Bound to these two addresses, never all interfaces: the NAS also has a
+# public IPv6 address, and non-owner audio must stay on the LAN and tailnet.
+HEARSAY_LAN_IP="$(ip -4 route get 1.1.1.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p')"
+HEARSAY_TAILNET_IP="$(ip -4 -o addr show tailscale0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)"
+[ -n "$HEARSAY_LAN_IP" ] || die "couldn't find the LAN address"
+# Manual: joining the tailnet needs the operator's Tailscale account.
+[ -n "$HEARSAY_TAILNET_IP" ] \
+    || die "no tailscale0 address. Install and log in to the Tailscale app (TrueNAS UI: Apps), then re-run."
+echo "LAN $HEARSAY_LAN_IP, tailnet $HEARSAY_TAILNET_IP"
+export HEARSAY_LAN_IP HEARSAY_TAILNET_IP
+
 say "Building images"
 # Baked into the worker image and recorded by each reprocess run, so a stale
 # image is visible. safe.directory: root runs git in a clone owned by apps.
@@ -49,14 +66,28 @@ export HEARSAY_COMMIT
 # --profile tools also builds the one-shot worker (reprocess) and check images.
 docker compose -f "$REPO_DIR/install/compose.yaml" --profile tools build
 
-say "Starting receiver"
+say "Starting receiver and portal"
 docker compose -f "$REPO_DIR/install/compose.yaml" up -d
 
 say "Verifying receiver rejects unauthenticated requests"
 wait_for_401 "http://127.0.0.1:$NAS_RECEIVER_PORT/omi/transcript" 30
+
+say "Verifying the portal answers on both addresses"
+for ip in "$HEARSAY_LAN_IP" "$HEARSAY_TAILNET_IP"; do
+    wait_for_status GET "http://$ip:$NAS_PORTAL_PORT/login" 200 30
+done
 
 say "Checking that every captured payload parses"
 # -T and /dev/null: never read the terminal, so typing ahead isn't swallowed.
 docker compose -f "$REPO_DIR/install/compose.yaml" run --rm -T check </dev/null
 
 say "Receiver is up on 127.0.0.1:$NAS_RECEIVER_PORT. Next: install/tunnel.sh"
+# Manual: the password manager is on the operator's devices.
+cat <<EOF
+
+Portal for naming speakers (save it in your password manager):
+  http://$HEARSAY_TAILNET_IP:$NAS_PORTAL_PORT   (tailnet: encrypted; use this from your phone)
+  http://$HEARSAY_LAN_IP:$NAS_PORTAL_PORT   (LAN: unencrypted Wi-Fi)
+  username: $(env_get "$NAS_PORTAL_ENV" HEARSAY_PORTAL_USER)
+  password: sudo sed -n 's/^HEARSAY_PORTAL_PASSWORD=//p' $NAS_PORTAL_ENV
+EOF

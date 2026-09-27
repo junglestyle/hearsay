@@ -18,9 +18,12 @@ Downstream consumers read this. They never receive audio.
 
 - Raw webhook payloads are written to disk verbatim before any parsing.
   Never modify or delete raw payloads as part of processing.
-- Audio never leaves Hearsay. Hearsay's boundary is the operator's own
-  machines: the NAS and the dev box (which has the GPU). Audio may move
-  between them; it never goes to third-party services or downstream consumers.
+- Audio never leaves Hearsay. Hearsay's boundary is the operator's home LAN
+  and Tailscale tailnet: the NAS, the dev box (which has the GPU), and the
+  operator's phone. Audio, including non-owner audio, may move between them.
+  It is never exposed on the public internet (the Cloudflare tunnel carries
+  only the receiver) and never goes to third-party services or downstream
+  consumers.
 - Non-owner audio is deleted after embedding and transcription, per retention
   policy. Owner audio may be kept.
 - Speaker embeddings are retained indefinitely; tagging and merging must be
@@ -30,25 +33,26 @@ Downstream consumers read this. They never receive audio.
 
 ## Current slice
 
-Slice 4: me vs. not-me. `hearsay/speakers.py` embeds each segment with
-SpeechBrain ECAPA (CPU, pinned model baked into the worker image, offline) and
-labels it owner / not_owner by cosine similarity to the owner's enrolled voice.
-It runs as the last step of `python -m hearsay.reprocess`, after the database
-(slice 2) and conversation audio (slice 3).
+Slice 5: anonymous speakers and tagging. `hearsay/people.py` clusters
+not-owner segment embeddings (average linkage, cosine threshold) as the last
+step of reprocess, and applies the operator's names.
 
-- Tuned for precision: between the two thresholds, a segment stays unlabeled,
-  and so does anything under 2.5 s or with under 80% received audio.
-- Operator input (enrollment windows, ear labels) lives in the labels dir on
-  the NAS. It is durable, not derived: reprocessing reads it and never writes.
-  `hearsay/label.py` writes it from the dev box.
-- Thresholds are tuned against ear labels (`python -m hearsay.label report`);
-  re-check them as more labels come in. Omi's is_user labels are for
-  comparison only, never ground truth (they agreed with ear labels 79% of
-  the time).
+- Clusters are derived and unstable across reprocesses; names are durable
+  input stored on specific segment ids (labels/tags.jsonl), never on cluster
+  ids. A cluster takes its tagged segments' name, so naming is retroactive;
+  the same name on two clusters merges them into one person. Conflicting
+  names leave a cluster unnamed and flagged.
+- `hearsay/portal.py` is the web portal for naming clusters, built for the
+  phone. It binds to the LAN and tailnet addresses only, never all
+  interfaces, and never goes through the Cloudflare tunnel. Login is an HTML
+  form (for password managers) with an HMAC-signed session cookie.
+- "Mixed" answers and people spread over clusters (shown by
+  `python -m hearsay.label report`) tune CLUSTER_THRESHOLD.
+- Retention is not part of this slice. All audio is kept until tagging is
+  reliable (roadmap slice 6).
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when owner speech is labeled reliably on real conversations, and misses
-are rare enough to ignore.
+Done when tagging a speaker once relabels their past conversations.
 
 ## Engineering style
 

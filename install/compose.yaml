@@ -16,6 +16,30 @@ services:
       - "127.0.0.1:8787:8000"
     restart: unless-stopped
 
+  # Web portal for naming speakers. Reachable on the LAN and tailnet only:
+  # never 0.0.0.0 (the NAS has a public IPv6 address), and never add it to
+  # the Cloudflare tunnel. install/nas.sh exports the two addresses; the
+  # loopback defaults only apply when compose runs without them.
+  portal:
+    image: hearsay
+    pull_policy: never
+    container_name: hearsay-portal
+    user: "568:568"
+    env_file: /mnt/storage/hearsay/config/portal.env
+    environment:
+      HEARSAY_DB: /data/db/hearsay.sqlite
+      HEARSAY_AUDIO_DIR: /data/audio
+      HEARSAY_LABELS_DIR: /data/labels
+    volumes:
+      - /mnt/storage/hearsay/db:/data/db:ro
+      - /mnt/storage/hearsay/audio:/data/audio:ro
+      - /mnt/storage/hearsay/labels:/data/labels
+    ports:
+      - "${HEARSAY_LAN_IP:-127.0.0.1}:8788:8000"
+      - "${HEARSAY_TAILNET_IP:-127.0.0.2}:8788:8000"
+    command: ["uvicorn", "--factory", "hearsay.portal:app_from_env", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+
   # One-shot, not started by `up`: rebuilds the database, conversation audio
   # and speaker labels from raw. The labels dir holds the operator's own input
   # (enrollment windows, labels), which reprocessing reads but never writes.

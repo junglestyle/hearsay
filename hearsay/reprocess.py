@@ -1,4 +1,4 @@
-"""Rebuild everything derived from raw: database, conversation audio, speaker labels."""
+"""Rebuild everything derived from raw: database, conversation audio, speaker labels, people."""
 
 import os
 import sqlite3
@@ -7,7 +7,8 @@ from pathlib import Path
 
 from hearsay.assemble import assemble
 from hearsay.parse import ParseFailed, rebuild
-from hearsay import speakers
+from hearsay.people import group_people
+from hearsay import people, speakers
 from hearsay.speakers import label_speakers
 
 
@@ -37,6 +38,11 @@ def main() -> None:
     for name, n in labeled.items():
         print(f"  {name}: {n}")
 
+    grouped = group_people(db_path, labels_dir)
+    print("Anonymous speakers and names:")
+    for name, n in grouped.items():
+        print(f"  {name}: {n}")
+
     record_run(db_path)
 
 
@@ -47,6 +53,7 @@ def record_run(db_path: Path) -> None:
         "min_segment": speakers.MIN_SEGMENT,
         "owner_threshold": speakers.OWNER_THRESHOLD,
         "not_owner_threshold": speakers.NOT_OWNER_THRESHOLD,
+        "cluster_threshold": people.CLUSTER_THRESHOLD,
     }
     db = sqlite3.connect(db_path)
     try:

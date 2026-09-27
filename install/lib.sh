@@ -12,7 +12,9 @@ NAS_AUDIO="$NAS_ROOT/audio"
 NAS_LABELS="$NAS_ROOT/labels"
 NAS_RECEIVER_ENV="$NAS_CONFIG/receiver.env"
 NAS_TUNNEL_ENV="$NAS_CONFIG/tunnel.env"
+NAS_PORTAL_ENV="$NAS_CONFIG/portal.env"
 NAS_RECEIVER_PORT=8787
+NAS_PORTAL_PORT=8788
 APPS_UID=568
 APPS_GID=568
 
@@ -51,14 +53,19 @@ env_ensure() {
     chmod 600 "$file"
 }
 
-# POSTs without a token and waits until the receiver answers 401.
-# Any other code (502, 530, ...) means something in front of it isn't up yet.
-wait_for_401() {
-    local url="$1" seconds="$2" code=""
+# Waits until METHOD URL answers CODE. Any other code (502, 530, ...) means
+# something in front of it isn't up yet.
+wait_for_status() {
+    local method="$1" url="$2" expected="$3" seconds="$4" code=""
     for _ in $(seq "$seconds"); do
-        code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url" || true)"
-        [ "$code" = "401" ] && return 0
+        code="$(curl -s -o /dev/null -w '%{http_code}' -X "$method" "$url" || true)"
+        [ "$code" = "$expected" ] && return 0
         sleep 1
     done
-    die "expected 401 from $url, last got '$code'"
+    die "expected $expected from $method $url, last got '$code'"
+}
+
+# POSTs without a token and waits until the receiver answers 401.
+wait_for_401() {
+    wait_for_status POST "$1" 401 "$2"
 }

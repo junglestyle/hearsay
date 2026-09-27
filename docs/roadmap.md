@@ -45,13 +45,19 @@ Cluster non-owner embeddings into anonymous speakers. Support tagging a
 cluster with a name and merging clusters. Tags and merges apply
 retroactively to all past utterances.
 
-Apply retention: delete non-owner audio after embedding and
-transcription.
+Done when: tagging a speaker once relabels their past conversations.
 
-Done when: tagging a speaker once relabels their past conversations,
-and non-owner audio is actually gone from disk.
+## 6. Retention
 
-## After slice 5
+Delete non-owner audio after embedding and transcription. Starts only
+once tagging is reliable: until then all audio is kept, because deleted
+audio can't be re-embedded or re-tagged. First resolve how this fits
+"raw payloads are never deleted" and "everything re-runs from raw".
+
+Done when: non-owner audio is actually gone from disk, and nothing that
+depends on it breaks.
+
+## After slice 6
 
 Expose the utterance stream (conversation_id, timestamps, speaker,
 text, confidence) for downstream consumers. Idea Machine is the first

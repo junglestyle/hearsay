@@ -17,9 +17,10 @@ Secrets are kept in env files outside the repo.
    git clone <repo-url> /mnt/storage/hearsay/repo
    sudo /mnt/storage/hearsay/repo/install/nas.sh
    ```
-   This creates the datasets and the receiver secret, builds the images, starts
-   the receiver on `127.0.0.1:8787`, and checks that every captured payload
-   parses. Before you run it, the Apps pool must be set in the
+   This creates the datasets and secrets, builds the images, starts the
+   receiver on `127.0.0.1:8787` and the speaker-naming portal on the LAN and
+   tailnet, and checks that every captured payload reprocesses. The NAS must
+   already be on your tailnet (the Tailscale app in the TrueNAS UI). Before you run it, the Apps pool must be set in the
    TrueNAS UI. The script checks this and tells you if it isn't.
 3. **NAS, as root:** [`install/tunnel.sh`](install/tunnel.sh) connects a Cloudflare Tunnel,
    shows you the webhook URLs to enter in the Omi app, and waits until real
@@ -74,6 +75,20 @@ which reprocessing reads but never writes. From the repo on the dev box:
 4. See precision per threshold: `.venv/bin/python -m hearsay.label report`,
    then set `OWNER_THRESHOLD` / `NOT_OWNER_THRESHOLD` in
    [`hearsay/speakers.py`](hearsay/speakers.py), deploy, and reprocess.
+
+## Naming other speakers (phone or any browser)
+
+Reprocessing groups not-owner segments into anonymous speaker clusters. Name
+them in the web portal that `nas.sh` starts, at the addresses it prints. It
+listens on the LAN and tailnet only, so from your phone use the tailnet
+address. Each cluster plays a few samples. Type a name (reusing a name merges
+into that person), mark it as more than one person, or skip it.
+
+Names are stored on the segments you heard, in `/mnt/storage/hearsay/labels/`,
+so they survive reclustering and apply to every past conversation. The portal
+shows them immediately; the database picks them up on the next reprocess.
+`.venv/bin/python -m hearsay.label report` shows cluster health, for tuning
+`CLUSTER_THRESHOLD` in [`hearsay/people.py`](hearsay/people.py).
 
 To re-run the test suite against the real captures (also run by `nas.sh`):
 

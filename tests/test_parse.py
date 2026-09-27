@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from hearsay.assemble import assemble
 from hearsay.parse import ParseFailed, rebuild
+from hearsay.people import group_people
 from hearsay.receiver import create_app
 from hearsay.speakers import label_speakers
 
@@ -115,3 +116,4 @@ def test_every_real_captured_payload_reprocesses(tmp_path):
     rebuild(raw, db_path)
     assemble(raw, db_path, tmp_path / "audio")
     label_speakers(raw, db_path, tmp_path / "labels", Path(os.environ["HEARSAY_MODEL_DIR"]))
+    group_people(db_path, tmp_path / "labels")

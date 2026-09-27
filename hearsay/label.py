@@ -1,12 +1,14 @@
 """Label segments by ear, and report how well the thresholds match the labels.
 
+Naming other speakers happens in the web portal (hearsay/portal.py).
+
 Runs on the dev box, not in the container: it plays audio locally and reaches
 the NAS over `ssh nas`. Labels are the operator's durable input: they are
 appended to the labels dir on the NAS and never rebuilt or overwritten.
 
     python -m hearsay.label enroll START END   # add an enrollment window
-    python -m hearsay.label                    # label segments, blind (no text, no score)
-    python -m hearsay.label report             # precision/recall per threshold
+    python -m hearsay.label                    # label segments me / not me, blind
+    python -m hearsay.label report             # precision/recall, cluster health
 
 START and END are ISO-8601 times, e.g. 2026-09-27T10:05; without a UTC
 offset they are this machine's local time. Reprocess after enrolling.
@@ -19,6 +21,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 
+from hearsay.people import CLUSTER_THRESHOLD, parse_tags
 from hearsay.speakers import NOT_OWNER_THRESHOLD, OWNER_THRESHOLD
 
 NAS = "nas"
@@ -26,6 +29,7 @@ DB = "/mnt/storage/hearsay/db/hearsay.sqlite"
 AUDIO_DIR = "/mnt/storage/hearsay/audio"
 LABELS = "/mnt/storage/hearsay/labels/labels.jsonl"
 ENROLLMENT = "/mnt/storage/hearsay/labels/enrollment.json"
+TAGS = "/mnt/storage/hearsay/labels/tags.jsonl"
 ANSWERS = {"m": "owner", "n": "not_owner", "u": "unsure"}
 
 CANDIDATES_SQL = """
@@ -34,6 +38,11 @@ FROM segment_speakers ss
 JOIN segments s ON s.payload_path = ss.payload_path AND s.idx = ss.idx
 JOIN conversation_audio ca ON ca.conversation_id = ss.conversation_id
 WHERE ss.embedding IS NOT NULL
+"""
+
+CLUSTERS_SQL = """
+SELECT sp.segment_id, sp.cluster, sp.person, sp.name_conflict
+FROM segment_people sp
 """
 
 # Runs on the NAS: writes one segment of a conversation WAV to stdout as WAV.
@@ -54,9 +63,25 @@ def ssh(command: list[str], stdin: bytes = b"") -> bytes:
     return subprocess.run(["ssh", NAS, *command], input=stdin, capture_output=True, check=True).stdout
 
 
-def candidates() -> list[dict]:
-    out = ssh(["sqlite3", "-json", DB, f'"{" ".join(CANDIDATES_SQL.split())}"'])
+def query(sql: str) -> list[dict]:
+    out = ssh(["sqlite3", "-json", DB, f'"{" ".join(sql.split())}"'])
     return json.loads(out or b"[]")
+
+
+def candidates() -> list[dict]:
+    return query(CANDIDATES_SQL)
+
+
+def clusters() -> dict[str, list[dict]]:
+    """cluster -> its segments, largest cluster first."""
+    grouped = {}
+    for row in query(CLUSTERS_SQL):
+        grouped.setdefault(row["cluster"], []).append(row)
+    return dict(sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])))
+
+
+def existing_tags() -> tuple[dict[str, str], list[list[str]]]:
+    return parse_tags(ssh(["sh", "-c", f"'cat {TAGS} 2>/dev/null || true'"]).decode())
 
 
 def existing_labels() -> dict[str, str]:
@@ -154,6 +179,33 @@ def report() -> None:
         t_owner, t_not = 0.3 + i * 0.05, 0.1 + i * 0.04
         print(f"{line(rows, 'owner', lambda sim: sim >= t_owner, t_owner)}   "
               f"{line(rows, 'not_owner', lambda sim: sim <= t_not, t_not)}")
+    cluster_report()
+
+
+def cluster_report() -> None:
+    try:
+        grouped = clusters()
+    except subprocess.CalledProcessError:
+        print("\nno clusters yet (reprocess with this code first)")
+        return
+    names, mixed = existing_tags()
+    marked_mixed = {segment_id for group in mixed for segment_id in group}
+    people = {}
+    for c, segs in grouped.items():
+        if segs[0]["person"]:
+            people.setdefault(segs[0]["person"], []).append(c)
+    reviewed = [segs for segs in grouped.values()
+                if any(s["segment_id"] in names or s["segment_id"] in marked_mixed for s in segs)]
+    mixed_now = [segs for segs in reviewed if marked_mixed & {s["segment_id"] for s in segs}]
+    sizes = sorted((len(s) for s in grouped.values()), reverse=True)
+    print(f"\nanonymous speakers (cluster threshold in this checkout: {CLUSTER_THRESHOLD})")
+    print(f"  {len(grouped)} clusters, sizes {sizes[:12]}{' ...' if len(sizes) > 12 else ''}")
+    print(f"  {len(people)} named people over {sum(len(c) for c in people.values())} clusters")
+    print(f"  reviewed clusters marked mixed: {len(mixed_now)}/{len(reviewed)}  (many: raise the threshold)")
+    spread = {p: len(c) for p, c in people.items() if len(c) > 1}
+    print(f"  people spread over several clusters: {spread or 'none'}  (many: lower the threshold)")
+    conflicts = sum(1 for segs in grouped.values() if segs[0]["name_conflict"])
+    print(f"  clusters with conflicting names: {conflicts}")
 
 
 def line(rows, label, predicate, threshold) -> str:
