@@ -108,3 +108,20 @@ def test_segment_audio_supports_byte_ranges_for_ios(portal):
     assert probe.status_code == 206
     assert probe.content == full.content[:2]
     assert probe.headers["content-range"] == f"bytes 0-1/{len(full.content)}"
+
+
+def test_skipped_clusters_go_to_the_back_of_the_queue(portal):
+    client, db_path, labels_dir = portal
+    log_in(client)
+    db = sqlite3.connect(db_path)
+    cluster = dict(db.execute("SELECT segment_id, cluster FROM segment_people"))
+    db.close()
+    first, second = cluster["a0"], cluster["b1"]
+
+    skipped = client.post(f"/cluster/{first}", data={"action": "skip"}, follow_redirects=False)
+    assert skipped.headers["location"] == f"/cluster/{second}"
+    index = client.get("/").text
+    assert index.index("Skipped (1)") < index.index(f"/cluster/{first}")
+
+    named = client.post(f"/cluster/{second}", data={"action": "name", "name": "Bob"}, follow_redirects=False)
+    assert named.headers["location"] == f"/cluster/{first}"  # comes round again once the rest is done

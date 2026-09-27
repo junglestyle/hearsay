@@ -144,14 +144,15 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             grouped.setdefault(row["cluster"], []).append(row)
         return dict(sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])))
 
-    def unnamed(grouped, names, mixed) -> list[str]:
-        marked_mixed = {s for group in mixed for s in group}
-        return [
-            c for c, segs in grouped.items()
-            if len(segs) >= MIN_TAG_CLUSTER
-            and cluster_name([s["segment_id"] for s in segs], names)[0] is None
-            and not marked_mixed & {s["segment_id"] for s in segs}
-        ]
+    def unnamed(grouped, names, mixed, skipped) -> tuple[list[str], list[str]]:
+        """Clusters still to name, largest first: (not skipped, skipped)."""
+        todo, later = [], []
+        for c, segs in grouped.items():
+            ids = {s["segment_id"] for s in segs}
+            if len(segs) < MIN_TAG_CLUSTER or mixed & ids or cluster_name(ids, names)[0]:
+                continue
+            (later if skipped & ids else todo).append(c)
+        return todo, later
 
     def append_tag(record: dict) -> None:
         record["tagged_at"] = datetime.now(timezone.utc).isoformat()
@@ -203,8 +204,8 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         if not logged_in(request):
             return RedirectResponse("/login", status_code=303)
         grouped = load_clusters()
-        names, mixed = read_tags()
-        todo = unnamed(grouped, names, mixed)
+        names, mixed, skipped = read_tags()
+        todo, later = unnamed(grouped, names, mixed, skipped)
         people = {}
         conflicts = 0
         for c, segs in grouped.items():
@@ -212,11 +213,13 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             conflicts += conflict
             if person:
                 people.setdefault(person, []).append((c, len(segs)))
-        todo_items = "".join(
-            f"<li><a href='/cluster/{quote(c)}'>{len(grouped[c])} segments"
-            f" <span class='muted'>· {len({s['conversation_id'] for s in grouped[c]})} conversation(s)</span></a></li>"
-            for c in todo
-        )
+        def items(clusters):
+            return "".join(
+                f"<li><a href='/cluster/{quote(c)}'>{len(grouped[c])} segments"
+                f" <span class='muted'>· {len({s['conversation_id'] for s in grouped[c]})} conversation(s)</span></a></li>"
+                for c in clusters
+            )
+
         people_items = "".join(
             f"<li><a href='/cluster/{quote(clusters[0][0])}'>{html.escape(p)}</a>"
             f" <span class='muted'>{sum(n for _, n in clusters)} segments in {len(clusters)} cluster(s)</span></li>"
@@ -225,7 +228,8 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         return page("Hearsay speakers", f"""
 <h1>Speakers</h1>
 <p class="muted">{len(grouped)} clusters · {conflicts} with conflicting names</p>
-<h2>To name ({len(todo)})</h2><ul>{todo_items or "<li class='muted'>Nothing left to name.</li>"}</ul>
+<h2>To name ({len(todo)})</h2><ul>{items(todo) or "<li class='muted'>Nothing left to name.</li>"}</ul>
+<h2>Skipped ({len(later)})</h2><ul>{items(later) or "<li class='muted'>None.</li>"}</ul>
 <h2>People ({len(people)})</h2><ul>{people_items or "<li class='muted'>None yet.</li>"}</ul>
 <form method="post" action="/logout"><button type="submit">Log out</button></form>""")
 
@@ -236,12 +240,9 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         grouped = load_clusters()
         if cluster_id not in grouped:
             return RedirectResponse("/", status_code=303)
-        names, mixed = read_tags()
+        names, _, _ = read_tags()
         segments = grouped[cluster_id]
         person, conflict = cluster_name([s["segment_id"] for s in segments], names)
-        todo = unnamed(grouped, names, mixed)
-        later = [c for c in todo if c != cluster_id]
-        skip = f"/cluster/{quote(later[0])}" if later else "/"
         if person:
             status = f"Named <strong>{html.escape(person)}</strong>. Saving a new name renames this cluster."
         elif conflict:
@@ -265,8 +266,8 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
   <datalist id="known">{known}</datalist>
   <button type="submit" name="action" value="name">Save name</button>
   <button type="submit" name="action" value="mixed">More than one person</button>
-</form>
-<p><a href="{skip}">Skip</a></p>""")
+  <button type="submit" name="action" value="skip" formnovalidate>Skip for now</button>
+</form>""")
 
     @app.post("/cluster/{cluster_id}")
     async def tag_cluster(request: Request, cluster_id: str) -> Response:
@@ -278,11 +279,13 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         form = parse_qs((await request.body()).decode())
         action = form.get("action", [""])[0]
         name = " ".join(form.get("name", [""])[0].split())
-        names, _ = read_tags()
+        names, _, _ = read_tags()
         segments = grouped[cluster_id]
         heard = [s["segment_id"] for s in samples(segments)]
         if action == "mixed":
             append_tag({"type": "mixed", "segment_ids": heard})
+        elif action == "skip":
+            append_tag({"type": "skip", "segment_ids": heard})
         elif action == "name" and name:
             # Also retag this cluster's already-tagged segments, so a new name
             # renames the cluster or settles a conflict.
@@ -290,9 +293,11 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             append_tag({"type": "name", "segment_ids": ids, "name": name})
         else:
             return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)
-        names, mixed = read_tags()
-        todo = unnamed(grouped, names, mixed)
-        return RedirectResponse(f"/cluster/{quote(todo[0])}" if todo else "/", status_code=303)
+        # Next: the first unskipped cluster; skipped ones only come round again
+        # once everything else is done, and never straight back to this one.
+        todo, later = unnamed(grouped, *read_tags())
+        following = [c for c in todo + later if c != cluster_id]
+        return RedirectResponse(f"/cluster/{quote(following[0])}" if following else "/", status_code=303)
 
     @app.get("/audio/{segment_id}")
     async def audio(request: Request, segment_id: str) -> Response:

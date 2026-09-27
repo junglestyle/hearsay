@@ -82,7 +82,8 @@ Reprocessing groups not-owner segments into anonymous speaker clusters. Name
 them in the web portal that `nas.sh` starts, at the addresses it prints. It
 listens on the LAN and tailnet only, so from your phone use the tailnet
 address. Each cluster plays a few samples. Type a name (reusing a name merges
-into that person), mark it as more than one person, or skip it.
+into that person), mark it as more than one person, or skip it for now: skipped
+clusters move to their own list and come round again after the rest.
 
 Names are stored on the segments you heard, in `/mnt/storage/hearsay/labels/`,
 so they survive reclustering and apply to every past conversation. The portal

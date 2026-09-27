@@ -80,7 +80,7 @@ def clusters() -> dict[str, list[dict]]:
     return dict(sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])))
 
 
-def existing_tags() -> tuple[dict[str, str], list[list[str]]]:
+def existing_tags() -> tuple[dict[str, str], set[str], set[str]]:
     return parse_tags(ssh(["sh", "-c", f"'cat {TAGS} 2>/dev/null || true'"]).decode())
 
 
@@ -188,8 +188,7 @@ def cluster_report() -> None:
     except subprocess.CalledProcessError:
         print("\nno clusters yet (reprocess with this code first)")
         return
-    names, mixed = existing_tags()
-    marked_mixed = {segment_id for group in mixed for segment_id in group}
+    names, marked_mixed, _ = existing_tags()
     people = {}
     for c, segs in grouped.items():
         if segs[0]["person"]:

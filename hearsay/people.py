@@ -34,17 +34,20 @@ CREATE TABLE segment_people (
 """
 
 
-def parse_tags(text: str) -> tuple[dict[str, str], list[list[str]]]:
-    """Names by segment_id (latest wins), and the segment groups marked mixed."""
-    names, mixed = {}, []
+def parse_tags(text: str) -> tuple[dict[str, str], set[str], set[str]]:
+    """Names by segment_id (latest wins), and the segments heard in clusters
+    marked mixed (several people) or skipped (decide later)."""
+    names, mixed, skipped = {}, set(), set()
     for line in text.splitlines():
         record = json.loads(line)
         if record["type"] == "name":
             for segment_id in record["segment_ids"]:
                 names[segment_id] = record["name"]
         elif record["type"] == "mixed":
-            mixed.append(record["segment_ids"])
-    return names, mixed
+            mixed.update(record["segment_ids"])
+        elif record["type"] == "skip":
+            skipped.update(record["segment_ids"])
+    return names, mixed, skipped
 
 
 def cluster_name(segment_ids, names: dict[str, str]) -> tuple[str | None, bool]:
@@ -66,7 +69,7 @@ def cluster(vectors) -> list[int]:
 
 def group_people(db_path: Path, labels_dir: Path) -> dict:
     tags_path = labels_dir / "tags.jsonl"
-    names, _ = parse_tags(tags_path.read_text() if tags_path.exists() else "")
+    names, _, _ = parse_tags(tags_path.read_text() if tags_path.exists() else "")
     db = sqlite3.connect(db_path)
     try:
         rows = db.execute(
