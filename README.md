@@ -54,7 +54,26 @@ docker compose -f /mnt/storage/hearsay/repo/install/compose.yaml run --rm reproc
   silence; the `conversation_audio` table records how each file was aligned
   and what fraction of it is real audio.
 
-Raw is mounted read-only. Members of the `apps` group can read both.
+- Speaker embeddings and owner / not-owner labels per segment, in the
+  `segment_speakers` table.
+
+Raw is mounted read-only. Members of the `apps` group can read the outputs.
+
+## Owner voice (dev box, then NAS)
+
+Speaker labels need your voice enrolled, and thresholds tuned against segments
+you've labeled by ear. Your input lives in `/mnt/storage/hearsay/labels/`,
+which reprocessing reads but never writes. From the repo on the dev box:
+
+1. Record yourself reading aloud for about 3 minutes, alone, with the pendant
+   streaming. Then register the window (local time):
+   `.venv/bin/python -m hearsay.label enroll 2026-09-27T10:05 2026-09-27T10:08`
+2. Reprocess on the NAS (above).
+3. Label segments by ear: `.venv/bin/python -m hearsay.label` (plays audio
+   locally, over `ssh nas`).
+4. See precision per threshold: `.venv/bin/python -m hearsay.label report`,
+   then set `OWNER_THRESHOLD` / `NOT_OWNER_THRESHOLD` in
+   [`hearsay/speakers.py`](hearsay/speakers.py), deploy, and reprocess.
 
 To re-run the test suite against the real captures (also run by `nas.sh`):
 

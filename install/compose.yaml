@@ -16,11 +16,14 @@ services:
       - "127.0.0.1:8787:8000"
     restart: unless-stopped
 
-  # One-shot, not started by `up`: rebuilds the database and conversation
-  # audio from raw. Uses the receiver's image, which install/nas.sh builds.
+  # One-shot, not started by `up`: rebuilds the database, conversation audio
+  # and speaker labels from raw. The labels dir holds the operator's own input
+  # (enrollment windows, labels), which reprocessing reads but never writes.
   reprocess:
-    image: hearsay
-    pull_policy: never
+    build:
+      context: ..
+      target: worker
+    image: hearsay-worker
     profiles: [tools]
     user: "568:568"
     network_mode: none
@@ -28,13 +31,15 @@ services:
       HEARSAY_RAW_DIR: /data/raw
       HEARSAY_DB: /data/db/hearsay.sqlite
       HEARSAY_AUDIO_DIR: /data/audio
+      HEARSAY_LABELS_DIR: /data/labels
     volumes:
       - /mnt/storage/hearsay/raw:/data/raw:ro
       - /mnt/storage/hearsay/db:/data/db
       - /mnt/storage/hearsay/audio:/data/audio
+      - /mnt/storage/hearsay/labels:/data/labels:ro
     command: ["python", "-m", "hearsay.reprocess"]
 
-  # One-shot: the test suite, including the check that every real capture parses and assembles.
+  # One-shot: the test suite, including the check that every real capture reprocesses.
   check:
     build:
       context: ..

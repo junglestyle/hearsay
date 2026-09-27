@@ -14,7 +14,7 @@ fi
 
 say "Datasets under $NAS_POOL_DATASET"
 # midclt (not raw zfs) so the TrueNAS UI knows about them.
-for ds in "$NAS_POOL_DATASET" "$NAS_POOL_DATASET/config" "$NAS_POOL_DATASET/raw" "$NAS_POOL_DATASET/db" "$NAS_POOL_DATASET/audio"; do
+for ds in "$NAS_POOL_DATASET" "$NAS_POOL_DATASET/config" "$NAS_POOL_DATASET/raw" "$NAS_POOL_DATASET/db" "$NAS_POOL_DATASET/audio" "$NAS_POOL_DATASET/labels"; do
     if zfs list -H -o name "$ds" >/dev/null 2>&1; then
         echo "exists: $ds"
     else
@@ -22,7 +22,7 @@ for ds in "$NAS_POOL_DATASET" "$NAS_POOL_DATASET/config" "$NAS_POOL_DATASET/raw"
         echo "created: $ds"
     fi
 done
-[ -d "$NAS_RAW" ] && [ -d "$NAS_CONFIG" ] && [ -d "$NAS_DB" ] && [ -d "$NAS_AUDIO" ] || die "datasets not mounted under $NAS_ROOT"
+[ -d "$NAS_RAW" ] && [ -d "$NAS_CONFIG" ] && [ -d "$NAS_DB" ] && [ -d "$NAS_AUDIO" ] && [ -d "$NAS_LABELS" ] || die "datasets not mounted under $NAS_ROOT"
 
 chown root:root "$NAS_CONFIG"
 chmod 700 "$NAS_CONFIG"
@@ -33,12 +33,16 @@ for dir in "$NAS_DB" "$NAS_AUDIO"; do
     chown "$APPS_UID:$APPS_GID" "$dir"
     chmod 750 "$dir"
 done
+# Operator input (enrollment windows, labels), written over ssh by members of
+# the apps group from the dev box. setgid keeps new files in the apps group.
+chown "$APPS_UID:$APPS_GID" "$NAS_LABELS"
+chmod 2770 "$NAS_LABELS"
 
 say "Receiver secret in $NAS_RECEIVER_ENV"
 env_ensure "$NAS_RECEIVER_ENV" HEARSAY_SECRET "$(openssl rand -hex 32)"
 
 say "Building images"
-# --profile tools also builds the one-shot check image; reprocess reuses the receiver's.
+# --profile tools also builds the one-shot worker (reprocess) and check images.
 docker compose -f "$REPO_DIR/install/compose.yaml" --profile tools build
 
 say "Starting receiver"

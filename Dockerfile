@@ -6,8 +6,22 @@ COPY pyproject.toml /src/
 COPY hearsay /src/hearsay
 RUN pip install --no-cache-dir /src && rm -rf /src
 
+# Reprocessing: adds torch (CPU) and the speaker model, pinned to a commit and
+# baked in so runs are offline and repeatable.
+FROM app AS worker
+COPY pyproject.toml /src/
+COPY hearsay /src/hearsay
+RUN pip install --no-cache-dir torch==2.14.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir "/src[speakers]" && rm -rf /src
+# One load at build time: speechbrain adds files (symlinks) to the model dir on
+# first load, which the non-root runtime user can't write.
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('speechbrain/spkrec-ecapa-voxceleb', revision='0f99f2d0ebe89ac095bcc5903c4dd8f72b367286', local_dir='/models/ecapa')" \
+    && HF_HUB_OFFLINE=1 python -c "from pathlib import Path; from hearsay.speakers import load_model; load_model(Path('/models/ecapa'))" \
+    && chmod -R a+rX /models
+ENV HEARSAY_MODEL_DIR=/models/ecapa HF_HUB_OFFLINE=1
+
 # The test suite, for running on the NAS where real captures are mounted.
-FROM app AS test
+FROM worker AS test
 COPY pyproject.toml /src/
 COPY hearsay /src/hearsay
 RUN pip install --no-cache-dir "/src[dev]" && rm -rf /src

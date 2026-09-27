@@ -30,24 +30,24 @@ Downstream consumers read this. They never receive audio.
 
 ## Current slice
 
-Slice 3: audio assembly. `hearsay/assemble.py` cuts one WAV per conversation
-out of the continuous audio stream, so that segment start/end are offsets
-into the file. `python -m hearsay.reprocess` rebuilds the database (slice 2)
-and then the audio; both are fully derived from raw.
+Slice 4: me vs. not-me. `hearsay/speakers.py` embeds each segment with
+SpeechBrain ECAPA (CPU, pinned model baked into the worker image, offline) and
+labels it owner / not_owner by cosine similarity to the owner's enrolled voice.
+It runs as the last step of `python -m hearsay.reprocess`, after the database
+(slice 2) and conversation audio (slice 3).
 
-Rules come from measured captures, not Omi's docs:
-- Audio bursts are laid end to end and re-anchored to receipt time only when
-  audio was lost; holes are silence, and coverage is recorded.
-- Segment time 0 is estimated from live transcript arrival, not the memory's
-  started_at (which is often wrong). started_at is only a fallback, and the
-  source is recorded.
-- Only conversations with a memory payload are assembled. Memory payloads can
-  arrive hours late; the next reprocess picks them up.
+- Tuned for precision: between the two thresholds, a segment stays unlabeled,
+  and so does anything under 1 s or with under 80% received audio.
+- Operator input (enrollment windows, ear labels) lives in the labels dir on
+  the NAS. It is durable, not derived: reprocessing reads it and never writes.
+  `hearsay/label.py` writes it from the dev box.
+- Thresholds are provisional until tuned against ear labels with
+  `python -m hearsay.label report`. Omi's is_user labels are for comparison
+  only, never ground truth.
 
-Test fixtures are synthetic and committed. Real captures contain other
-people's speech and never enter the repo; the one test that reads them runs
-on the NAS and skips elsewhere. Done when each conversation has one playable
-audio file that lines up with its transcript timestamps.
+Test fixtures are synthetic and committed; real captures never enter the repo.
+Done when owner speech is labeled reliably on real conversations, and misses
+are rare enough to ignore.
 
 ## Engineering style
 

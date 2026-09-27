@@ -8,6 +8,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Installed in the worker image only; torch comes from the CPU wheel index there.
+speakers = [
+    "speechbrain==1.1.1",
+    "torch==2.14.0",
+    "torchaudio==2.11.0",
+]
 dev = [
     "pytest",
     "httpx2",
