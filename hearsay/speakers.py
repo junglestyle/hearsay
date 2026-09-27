@@ -16,16 +16,20 @@ from pathlib import Path
 
 from hearsay.assemble import cut, place_bursts, timestamp
 
-# Embeddings from shorter audio are unreliable.
-MIN_SEGMENT = 1.0
+# Thresholds tuned on 2026-09-27 against 176 ear-labeled real segments
+# (`python -m hearsay.label report`). Nearly all misses were under 2.5 s, and
+# the cutoff keeps 87% of speech time. At these values, labeled segments of
+# at least 2.5 s scored precision 1.00 on both sides (owner recall 0.93 over
+# 64 predictions, not-owner recall 0.90 over 26). Owner sits above 0.30, the
+# lowest value tested, for margin.
+MIN_SEGMENT = 2.5
 # Fraction of a segment that must be received audio, not filled silence.
 MIN_COVERAGE = 0.8
 # Enrollment audio is embedded in pieces this long, then averaged.
 ENROLLMENT_PIECE = 3.0
-# Cosine similarity to the owner's voice. Provisional until tuned against
-# operator labels with `python -m hearsay.label report`.
-OWNER_THRESHOLD = 0.6
-NOT_OWNER_THRESHOLD = 0.3
+# Cosine similarity to the owner's enrolled voice.
+OWNER_THRESHOLD = 0.40
+NOT_OWNER_THRESHOLD = 0.14
 
 SCHEMA = """
 DROP TABLE IF EXISTS segment_speakers;

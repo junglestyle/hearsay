@@ -37,13 +37,14 @@ It runs as the last step of `python -m hearsay.reprocess`, after the database
 (slice 2) and conversation audio (slice 3).
 
 - Tuned for precision: between the two thresholds, a segment stays unlabeled,
-  and so does anything under 1 s or with under 80% received audio.
+  and so does anything under 2.5 s or with under 80% received audio.
 - Operator input (enrollment windows, ear labels) lives in the labels dir on
   the NAS. It is durable, not derived: reprocessing reads it and never writes.
   `hearsay/label.py` writes it from the dev box.
-- Thresholds are provisional until tuned against ear labels with
-  `python -m hearsay.label report`. Omi's is_user labels are for comparison
-  only, never ground truth.
+- Thresholds are tuned against ear labels (`python -m hearsay.label report`);
+  re-check them as more labels come in. Omi's is_user labels are for
+  comparison only, never ground truth (they agreed with ear labels 79% of
+  the time).
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
 Done when owner speech is labeled reliably on real conversations, and misses
