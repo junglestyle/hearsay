@@ -28,17 +28,24 @@ Downstream consumers read this. They never receive audio.
 
 ## Current slice
 
-Slice 2: parse from reality. `hearsay/parse.py` rebuilds a SQLite database
-from raw payloads in one command; every run is a full rebuild, and raw is
-never written. Store only what payloads state: no merging of live transcript
-fragments, no inferring conversations. Omi's summary content (`structured`
-in memory payloads) is not parsed. Audio records only sample rate and receipt
-metadata; assembly is slice 3.
+Slice 3: audio assembly. `hearsay/assemble.py` cuts one WAV per conversation
+out of the continuous audio stream, so that segment start/end are offsets
+into the file. `python -m hearsay.reprocess` rebuilds the database (slice 2)
+and then the audio; both are fully derived from raw.
+
+Rules come from measured captures, not Omi's docs:
+- Audio bursts are laid end to end and re-anchored to receipt time only when
+  audio was lost; holes are silence, and coverage is recorded.
+- Segment time 0 is estimated from live transcript arrival, not the memory's
+  started_at (which is often wrong). started_at is only a fallback, and the
+  source is recorded.
+- Only conversations with a memory payload are assembled. Memory payloads can
+  arrive hours late; the next reprocess picks them up.
 
 Test fixtures are synthetic and committed. Real captures contain other
 people's speech and never enter the repo; the one test that reads them runs
-on the NAS and skips elsewhere. Done when every captured payload type parses
-and a full reprocess from raw is one command.
+on the NAS and skips elsewhere. Done when each conversation has one playable
+audio file that lines up with its transcript timestamps.
 
 ## Engineering style
 

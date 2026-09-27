@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import sqlite3
-import sys
 from pathlib import Path
 
 SCHEMA = """
@@ -69,8 +68,9 @@ CREATE TABLE memories (
 );
 CREATE INDEX memories_conversation_id ON memories(conversation_id);
 
--- Omi's own recording of the conversation. Its started_at is the zero point
--- for segment start/end, which audio assembly needs.
+-- Omi's own recording of the conversation. Its started_at matches the
+-- memory's created_at, not its started_at, and duration doesn't match the
+-- conversation span. Segment start/end count from memories.started_at.
 CREATE TABLE memory_audio_files (
     payload_path TEXT NOT NULL REFERENCES payloads(path),
     idx INTEGER NOT NULL,
@@ -229,21 +229,3 @@ def rebuild(raw_dir: Path, db_path: Path) -> dict:
     os.replace(tmp_path, db_path)
     counts["incomplete"] = incomplete
     return counts
-
-
-def main() -> None:
-    raw_dir = Path(os.environ["HEARSAY_RAW_DIR"])
-    db_path = Path(os.environ["HEARSAY_DB"])
-    try:
-        counts = rebuild(raw_dir, db_path)
-    except ParseFailed as e:
-        print(e, file=sys.stderr)
-        print(f"{db_path} left unchanged.", file=sys.stderr)
-        sys.exit(1)
-    print(f"Rebuilt {db_path} from {raw_dir}:")
-    for name, n in counts.items():
-        print(f"  {name}: {n}")
-
-
-if __name__ == "__main__":
-    main()

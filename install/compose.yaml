@@ -16,9 +16,9 @@ services:
       - "127.0.0.1:8787:8000"
     restart: unless-stopped
 
-  # One-shot, not started by `up`: rebuilds the database from raw.
-  # Uses the receiver's image, which install/nas.sh builds.
-  parse:
+  # One-shot, not started by `up`: rebuilds the database and conversation
+  # audio from raw. Uses the receiver's image, which install/nas.sh builds.
+  reprocess:
     image: hearsay
     pull_policy: never
     profiles: [tools]
@@ -27,12 +27,14 @@ services:
     environment:
       HEARSAY_RAW_DIR: /data/raw
       HEARSAY_DB: /data/db/hearsay.sqlite
+      HEARSAY_AUDIO_DIR: /data/audio
     volumes:
       - /mnt/storage/hearsay/raw:/data/raw:ro
       - /mnt/storage/hearsay/db:/data/db
-    command: ["python", "-m", "hearsay.parse"]
+      - /mnt/storage/hearsay/audio:/data/audio
+    command: ["python", "-m", "hearsay.reprocess"]
 
-  # One-shot: the test suite, including the check that every real capture parses.
+  # One-shot: the test suite, including the check that every real capture parses and assembles.
   check:
     build:
       context: ..

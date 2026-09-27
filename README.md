@@ -38,18 +38,23 @@ Webhooks land in `/mnt/storage/hearsay/raw/<type>/<date>/`:
 Omi's cloud backend sends every webhook, not the phone. The `cf-connecting-ip`
 header in the sidecars records where each request came from.
 
-## Parsing
+## Reprocessing
 
-Rebuild the database from raw, on the NAS as root:
+Rebuild everything derived from raw, on the NAS as root:
 
 ```sh
-docker compose -f /mnt/storage/hearsay/repo/install/compose.yaml run --rm parse
+docker compose -f /mnt/storage/hearsay/repo/install/compose.yaml run --rm reprocess
 ```
 
-It writes `/mnt/storage/hearsay/db/hearsay.sqlite`. Each run is a full rebuild
-and replaces the file only if every payload parses; otherwise it lists the
-failures and leaves the old database in place. Raw is mounted read-only.
-Members of the `apps` group can query the database with `sqlite3`.
+- `/mnt/storage/hearsay/db/hearsay.sqlite`: parsed payloads. Replaced only if
+  every payload parses; otherwise the failures are listed and the old database
+  and audio are left in place.
+- `/mnt/storage/hearsay/audio/<conversation_id>.wav`: each conversation's audio,
+  aligned so that segment times are offsets into the file. Missing audio is
+  silence; the `conversation_audio` table records how each file was aligned
+  and what fraction of it is real audio.
+
+Raw is mounted read-only. Members of the `apps` group can read both.
 
 To re-run the test suite against the real captures (also run by `nas.sh`):
 

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from hearsay.assemble import assemble
 from hearsay.parse import ParseFailed, rebuild
 from hearsay.receiver import create_app
 
@@ -106,5 +107,7 @@ REAL_RAW_DIR = os.environ.get("HEARSAY_CHECK_RAW_DIR")
 @pytest.mark.skipif(
     not REAL_RAW_DIR or not Path(REAL_RAW_DIR).is_dir(), reason="no real captures here"
 )
-def test_every_real_captured_payload_parses(tmp_path):
+def test_every_real_captured_payload_parses_and_assembles(tmp_path):
     rebuild(Path(REAL_RAW_DIR), tmp_path / "check.sqlite")
+    (tmp_path / "audio").mkdir()
+    assemble(Path(REAL_RAW_DIR), tmp_path / "check.sqlite", tmp_path / "audio")
