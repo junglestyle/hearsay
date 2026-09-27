@@ -133,6 +133,11 @@ def enroll(start: str, end: str) -> None:
 
 
 def report() -> None:
+    try:
+        built = ssh(["sqlite3", DB], b"SELECT key || '=' || value FROM reprocess_info;").decode().split()
+    except subprocess.CalledProcessError:
+        built = []  # the table only exists once a reprocess with this code has run
+    print("database built by: " + (", ".join(built) or "unknown (reprocess predates reprocess_info)"))
     enrolled = ssh(["sqlite3", DB, '"SELECT start, end, round(coverage, 2), pieces FROM owner_enrollment"'])
     print("enrollment (start | end | coverage | 3 s pieces used):")
     print(enrolled.decode() or "  none; run `python -m hearsay.label enroll` and reprocess\n")
@@ -142,7 +147,7 @@ def report() -> None:
     rows = [(sim, label) for sim, label in rows if label != "unsure"]
     owners = sum(1 for _, label in rows if label == "owner")
     print(f"{len(rows)} labeled segments with scores ({owners} owner, {len(rows) - owners} not owner)")
-    print(f"current thresholds: owner >= {OWNER_THRESHOLD}, not_owner <= {NOT_OWNER_THRESHOLD}\n")
+    print(f"thresholds in this checkout: owner >= {OWNER_THRESHOLD}, not_owner <= {NOT_OWNER_THRESHOLD}\n")
     print("owner if similarity >= t        not_owner if similarity <= t")
     print("   t  labeled  precision recall     t  labeled  precision recall")
     for i in range(11):

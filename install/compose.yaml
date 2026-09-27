@@ -23,6 +23,8 @@ services:
     build:
       context: ..
       target: worker
+      args:
+        HEARSAY_COMMIT: ${HEARSAY_COMMIT:-unknown}
     image: hearsay-worker
     profiles: [tools]
     user: "568:568"
@@ -44,6 +46,8 @@ services:
     build:
       context: ..
       target: test
+      args:
+        HEARSAY_COMMIT: ${HEARSAY_COMMIT:-unknown}
     image: hearsay-test
     profiles: [tools]
     user: "568:568"

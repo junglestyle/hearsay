@@ -1,11 +1,13 @@
 """Rebuild everything derived from raw: database, conversation audio, speaker labels."""
 
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
 from hearsay.assemble import assemble
 from hearsay.parse import ParseFailed, rebuild
+from hearsay import speakers
 from hearsay.speakers import label_speakers
 
 
@@ -30,10 +32,30 @@ def main() -> None:
     for name, n in assembled.items():
         print(f"  {name}: {n}")
 
-    speakers = label_speakers(raw_dir, db_path, labels_dir, model_dir)
+    labeled = label_speakers(raw_dir, db_path, labels_dir, model_dir)
     print("Speaker embeddings and labels:")
-    for name, n in speakers.items():
+    for name, n in labeled.items():
         print(f"  {name}: {n}")
+
+    record_run(db_path)
+
+
+def record_run(db_path: Path) -> None:
+    """Record what produced this database, so a stale image is easy to spot."""
+    info = {
+        "commit": os.environ.get("HEARSAY_COMMIT", "unknown"),
+        "min_segment": speakers.MIN_SEGMENT,
+        "owner_threshold": speakers.OWNER_THRESHOLD,
+        "not_owner_threshold": speakers.NOT_OWNER_THRESHOLD,
+    }
+    db = sqlite3.connect(db_path)
+    try:
+        db.executescript("DROP TABLE IF EXISTS reprocess_info; CREATE TABLE reprocess_info (key TEXT PRIMARY KEY, value TEXT)")
+        db.executemany("INSERT INTO reprocess_info VALUES (?, ?)", [(k, str(v)) for k, v in info.items()])
+        db.commit()
+    finally:
+        db.close()
+    print(f"Built from commit {info['commit']}.")
 
 
 if __name__ == "__main__":

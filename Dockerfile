@@ -19,6 +19,9 @@ RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(
     && HF_HUB_OFFLINE=1 python -c "from pathlib import Path; from hearsay.speakers import load_model; load_model(Path('/models/ecapa'))" \
     && chmod -R a+rX /models
 ENV HEARSAY_MODEL_DIR=/models/ecapa HF_HUB_OFFLINE=1
+# Last in the stage, so a new commit doesn't rebuild the layers above.
+ARG HEARSAY_COMMIT=unknown
+ENV HEARSAY_COMMIT=$HEARSAY_COMMIT
 
 # The test suite, for running on the NAS where real captures are mounted.
 FROM worker AS test

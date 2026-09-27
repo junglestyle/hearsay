@@ -42,6 +42,10 @@ say "Receiver secret in $NAS_RECEIVER_ENV"
 env_ensure "$NAS_RECEIVER_ENV" HEARSAY_SECRET "$(openssl rand -hex 32)"
 
 say "Building images"
+# Baked into the worker image and recorded by each reprocess run, so a stale
+# image is visible. safe.directory: root runs git in a clone owned by apps.
+HEARSAY_COMMIT="$(git -c safe.directory="$REPO_DIR" -C "$REPO_DIR" describe --always --dirty)"
+export HEARSAY_COMMIT
 # --profile tools also builds the one-shot worker (reprocess) and check images.
 docker compose -f "$REPO_DIR/install/compose.yaml" --profile tools build
 
@@ -52,6 +56,7 @@ say "Verifying receiver rejects unauthenticated requests"
 wait_for_401 "http://127.0.0.1:$NAS_RECEIVER_PORT/omi/transcript" 30
 
 say "Checking that every captured payload parses"
-docker compose -f "$REPO_DIR/install/compose.yaml" run --rm check
+# -T and /dev/null: never read the terminal, so typing ahead isn't swallowed.
+docker compose -f "$REPO_DIR/install/compose.yaml" run --rm -T check </dev/null
 
 say "Receiver is up on 127.0.0.1:$NAS_RECEIVER_PORT. Next: install/tunnel.sh"
