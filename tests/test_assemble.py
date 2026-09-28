@@ -4,7 +4,8 @@ import sqlite3
 import wave
 from datetime import datetime, timedelta, timezone
 
-from hearsay.assemble import LIVE_ARRIVAL_OFFSET, assemble
+from hearsay.assemble import assemble
+from hearsay.conversations import SCHEMA as CONVERSATIONS_SCHEMA
 from hearsay.parse import rebuild
 
 T = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -48,7 +49,16 @@ def seconds(s):
     return T + timedelta(seconds=s)
 
 
-def test_assembles_conversation_audio_aligned_to_live_transcript(tmp_path):
+def add_conversations(db_path, rows):
+    """What find_conversations would write, without running voice detection."""
+    db = sqlite3.connect(db_path)
+    db.executescript(CONVERSATIONS_SCHEMA)
+    db.executemany("INSERT INTO conversations VALUES (?,?,?,?,?)", rows)
+    db.commit()
+    db.close()
+
+
+def test_assembles_each_conversation_from_the_stream(tmp_path):
     raw, db_path, audio_dir = tmp_path / "raw", tmp_path / "h.sqlite", tmp_path / "audio"
     audio_dir.mkdir()
     (audio_dir / "stale.wav").write_bytes(b"old")
@@ -59,39 +69,29 @@ def test_assembles_conversation_audio_aligned_to_live_transcript(tmp_path):
     audio_burst(raw, 1, seconds(10.4))
     audio_burst(raw, 3, seconds(20))
 
-    # Live segment "a" arrives so that segment time 0 is T.
-    live = json.dumps({"segments": [segment("a", 2.0, 3.0)], "session_id": "u"}).encode()
-    write_payload(raw, "transcript", seconds(3.0 - LIVE_ARRIVAL_OFFSET), live, [["uid", "u"]])
-    # started_at is deliberately wrong: live arrival must win.
-    write_payload(raw, "memory", seconds(60),
-                  memory("c-live", seconds(-100), [segment("a", 2.0, 3.0), segment("b", 15.0, 20.0)]),
-                  [["uid", "u"]])
-    # No live copy and no audio in its window: falls back to started_at, no WAV.
-    write_payload(raw, "memory", seconds(61), memory("c-none", seconds(500), [segment("z", 0.0, 5.0)]),
-                  [["uid", "u"]])
-
     rebuild(raw, db_path)
+    # One conversation over the audio, one where no audio arrived.
+    add_conversations(db_path, [("c-audio", T.timestamp(), seconds(20).timestamp(), 15.0, 0),
+                                ("c-none", seconds(500).timestamp(), seconds(505).timestamp(), 5.0, 0)])
     assemble(raw, db_path, audio_dir)
 
     db = sqlite3.connect(db_path)
     rows = db.execute(
-        "SELECT conversation_id, zero_at, zero_source, duration, coverage, wav_file"
-        " FROM conversation_audio ORDER BY conversation_id"
+        "SELECT conversation_id, zero_at, duration, coverage, wav_file FROM conversation_audio ORDER BY conversation_id"
     ).fetchall()
     db.close()
     assert rows == [
-        ("c-live", T.isoformat(), "live", 20.0, 0.75, "c-live.wav"),
-        ("c-none", seconds(500).isoformat(), "started_at", 5.0, 0.0, None),
+        ("c-audio", T.isoformat(), 20.0, 0.75, "c-audio.wav"),
+        ("c-none", seconds(500).isoformat(), 5.0, 0.0, None),
     ]
 
-    with wave.open(str(audio_dir / "c-live.wav")) as w:
+    with wave.open(str(audio_dir / "c-audio.wav")) as w:
         assert (w.getframerate(), w.getnchannels(), w.getsampwidth()) == (16000, 1, 2)
         pcm = w.readframes(w.getnframes())
     per_second = [int.from_bytes(pcm[s * CHUNK : s * CHUNK + 2], "little") for s in range(20)]
     assert per_second == [1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0, 31, 32, 33, 34, 35]
-    assert sorted(p.name for p in audio_dir.iterdir()) == ["c-live.wav"]
+    assert sorted(p.name for p in audio_dir.iterdir()) == ["c-audio.wav"]
 
-    first = (audio_dir / "c-live.wav").read_bytes()
-    rebuild(raw, db_path)
+    first = (audio_dir / "c-audio.wav").read_bytes()
     assemble(raw, db_path, audio_dir)
-    assert (audio_dir / "c-live.wav").read_bytes() == first
+    assert (audio_dir / "c-audio.wav").read_bytes() == first

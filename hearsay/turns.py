@@ -7,15 +7,16 @@ is pending until the dev box redoes it. Turn times are offsets into that WAV,
 so they line up with the audio by construction.
 
 The operator's labels and names are durable input that must survive
-re-transcription, so they are matched to turns by time, not by id. The one
-exception is a rename, which names a person rather than turns. Older
-records name Omi segment ids and are placed via those segments' times; newer
-records carry their own spans. A turn inherits a record when the record's
-span covers at least half of the turn.
+re-transcription and changing conversation boundaries, so they are matched to
+turns by absolute time, not by id. The one exception is a rename, which names
+a person rather than turns. New records store absolute spans ("at"); older
+ones point into Omi's timeline and are placed via omi_timeline. A turn
+inherits a record when the record's span covers at least half of the turn.
 """
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 
@@ -23,6 +24,10 @@ from typing import NamedTuple
 MAX_GAP = 2.0
 # Fraction of a turn a labeled span must cover for the turn to inherit it.
 MIN_COVER = 0.5
+# Correction to the live-arrival estimate of Omi's segment time 0, measured on
+# five real conversations (+/-1.5 s). Only places records made before our
+# own conversation boundaries (see omi_timeline).
+LIVE_ARRIVAL_OFFSET = -0.5
 
 SCHEMA = """
 DROP TABLE IF EXISTS turns;
@@ -112,29 +117,75 @@ def build_turns(db_path: Path, transcripts_dir: Path) -> dict:
     return counts
 
 
+def wall(zero_at: str, start: float, end: float) -> list[str]:
+    """A span in a conversation WAV as absolute UTC times, how new records store it."""
+    zero = datetime.fromisoformat(zero_at).timestamp()
+    return [datetime.fromtimestamp(zero + t, timezone.utc).isoformat() for t in (start, end)]
+
+
+def omi_timeline(db: sqlite3.Connection) -> tuple[dict[str, float], dict[str, tuple[str, float, float]]]:
+    """Where older records point: Omi conversations' zero points (unix seconds),
+    and each Omi segment's (conversation, start, end) relative to that zero.
+
+    Records made before our own conversation boundaries name Omi segments, or
+    spans in WAVs that started at Omi's segment time 0. That zero was estimated
+    from live transcript arrival (arrival - segment end, minimised over the
+    conversation's segments, shifted by LIVE_ARRIVAL_OFFSET); it is recomputed
+    here from raw, so those records keep landing where they were made.
+    """
+    latest = {}  # Omi conversation -> its latest memory payload
+    for conversation_id, path, started_at in db.execute(
+        "SELECT m.conversation_id, m.payload_path, m.started_at FROM memories m"
+        " JOIN payloads p ON p.path = m.payload_path ORDER BY p.received_at, p.path"
+    ):
+        latest[conversation_id] = (path, started_at)
+    zeros, segments = {}, {}
+    for conversation_id, (path, started_at) in latest.items():
+        live = db.execute(
+            "SELECT lp.received_at, ls.end FROM segments ms"
+            " JOIN segments ls ON ls.segment_id = ms.segment_id"
+            " JOIN payloads lp ON lp.path = ls.payload_path"
+            " WHERE ms.payload_path = ? AND lp.type = 'transcript'",
+            (path,),
+        ).fetchall()
+        if live:
+            zeros[conversation_id] = min(
+                datetime.fromisoformat(received_at).timestamp() - end for received_at, end in live
+            ) + LIVE_ARRIVAL_OFFSET
+        else:
+            zeros[conversation_id] = datetime.fromisoformat(started_at).timestamp()
+        for segment_id, start, end in db.execute(
+            "SELECT segment_id, start, end FROM segments WHERE payload_path = ?", (path,)
+        ):
+            segments[segment_id] = (conversation_id, start, end)
+    return zeros, segments
+
+
 def resolve(db: sqlite3.Connection, labels_text: str, tags_text: str) -> OperatorInput:
-    """The operator's labels and tags, matched to the current turns by time."""
-    # Where the Omi segments named by older records sit, on the same timeline as the WAV.
-    legacy = {
-        segment_id: (conversation_id, start, end)
-        for segment_id, conversation_id, start, end in db.execute(
-            "SELECT s.segment_id, ca.conversation_id, s.start, s.end"
-            " FROM conversation_audio ca JOIN segments s ON s.payload_path = ca.memory_path"
+    """The operator's labels and tags, matched to the current turns by absolute time."""
+    zeros, segments = omi_timeline(db)
+    turns = [
+        (turn_id, datetime.fromisoformat(zero_at).timestamp() + start, datetime.fromisoformat(zero_at).timestamp() + end)
+        for turn_id, start, end, zero_at in db.execute(
+            "SELECT t.turn_id, t.start, t.end, ca.zero_at FROM turns t"
+            " JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id"
         )
-    }
-    by_conversation = {}
-    for turn_id, conversation_id, start, end in db.execute("SELECT turn_id, conversation_id, start, end FROM turns"):
-        by_conversation.setdefault(conversation_id, []).append((turn_id, start, end))
+    ]
+
+    def spans(record: dict) -> list[tuple[float, float]]:
+        if "at" in record:
+            return [tuple(datetime.fromisoformat(t).timestamp() for t in span) for span in record["at"]]
+        if "turns" in record:  # relative to an Omi conversation's zero point
+            return [(zeros[t["conversation_id"]] + t["start"], zeros[t["conversation_id"]] + t["end"])
+                    for t in record["turns"] if t["conversation_id"] in zeros]
+        ids = record.get("segment_ids") or ([record["segment_id"]] if "segment_id" in record else [])
+        return [(zeros[segments[i][0]] + segments[i][1], zeros[segments[i][0]] + segments[i][2])
+                for i in ids if i in segments]
 
     def covered(record: dict) -> list[str]:
-        if "turns" in record:
-            spans = [(t["conversation_id"], t["start"], t["end"]) for t in record["turns"]]
-        else:
-            ids = record.get("segment_ids") or ([record["segment_id"]] if "segment_id" in record else [])
-            spans = [legacy[i] for i in ids if i in legacy]
         hits = []
-        for conversation_id, start, end in spans:
-            for turn_id, t_start, t_end in by_conversation.get(conversation_id, []):
+        for start, end in spans(record):
+            for turn_id, t_start, t_end in turns:
                 overlap = min(end, t_end) - max(start, t_start)
                 if t_end > t_start and overlap >= MIN_COVER * (t_end - t_start):
                     hits.append(turn_id)

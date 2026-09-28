@@ -48,7 +48,9 @@ header in the sidecars records where each request came from.
 
 ## Reprocessing
 
-Rebuild everything derived from raw, on the NAS as root. Transcripts come from
+Rebuild everything derived from raw, on the NAS as root. Conversations are
+found in the audio stream itself (voice detection; a conversation ends after 3
+minutes of silence), not taken from Omi. Transcripts come from
 the dev box, so new audio takes two passes: a reprocess makes the WAVs, the
 dev box's hourly timer transcribes them (or run
 `systemctl --user start hearsay-transcribe` there), and the next reprocess

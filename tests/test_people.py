@@ -11,7 +11,9 @@ from hearsay.assemble import SCHEMA as ASSEMBLE_SCHEMA  # noqa: E402
 from hearsay.parse import SCHEMA as PARSE_SCHEMA  # noqa: E402
 from hearsay.people import group_people  # noqa: E402
 from hearsay.speakers import SCHEMA as SPEAKERS_SCHEMA  # noqa: E402
-from hearsay.turns import SCHEMA as TURNS_SCHEMA, record_operator_input  # noqa: E402
+from hearsay.turns import SCHEMA as TURNS_SCHEMA, record_operator_input, wall  # noqa: E402
+
+ZERO_AT = "2026-01-01T00:00:00+00:00"
 
 
 def unit(vector):
@@ -19,8 +21,9 @@ def unit(vector):
     return [x / norm for x in vector]
 
 
-def span(turn_id, conversation, start):
-    return {"turn_id": turn_id, "conversation_id": conversation, "start": start, "end": start + 4}
+def at(start):
+    """A tag's absolute span over the 4 s turn starting at start."""
+    return [wall(ZERO_AT, start, start + 4)]
 
 
 def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
@@ -47,6 +50,8 @@ def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
     labels_dir.mkdir()
     db = sqlite3.connect(db_path)
     db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA)
+    for conversation in ("c1", "c2", "c3", "c4"):
+        db.execute("INSERT INTO conversation_audio VALUES (?, ?, 600, 1, NULL, NULL)", (conversation, ZERO_AT))
     for idx, (turn_id, conversation, voice, label) in enumerate(turns):
         db.execute("INSERT INTO turns VALUES (?,?,?,?,?,?,?,?)",
                    (turn_id, conversation, idx, start[turn_id], start[turn_id] + 4, "synthetic",
@@ -57,12 +62,12 @@ def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
     db.close()
 
     tags = [
-        {"type": "name", "turns": [span("a0", "c1", start["a0"])], "name": "Alice"},  # one tag, from c1 only
-        {"type": "name", "turns": [span("b0", "c1", start["b0"])], "name": "Bob"},
-        {"type": "name", "turns": [span("b1", "c1", start["b1"])], "name": "Robert"},  # conflicting names
-        {"type": "name", "turns": [span("c0", "c2", start["c0"])], "name": "Carol"},
-        {"type": "name", "turns": [span("d2", "c3", start["d2"])], "name": "Carol"},  # same name merges clusters
-        {"type": "name", "turns": [span("gone", "c9", 0.0)], "name": "Nobody"},  # nothing there any more
+        {"type": "name", "at": at(start["a0"]), "name": "Alice"},  # one tag, from c1 only
+        {"type": "name", "at": at(start["b0"]), "name": "Bob"},
+        {"type": "name", "at": at(start["b1"]), "name": "Robert"},  # conflicting names
+        {"type": "name", "at": at(start["c0"]), "name": "Carol"},
+        {"type": "name", "at": at(start["d2"]), "name": "Carol"},  # same name merges clusters
+        {"type": "name", "at": at(9_000.0), "name": "Nobody"},  # nothing there any more
     ]
     (labels_dir / "tags.jsonl").write_text("".join(json.dumps(t) + "\n" for t in tags))
 

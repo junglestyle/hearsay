@@ -29,7 +29,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from hearsay.people import cluster_name
-from hearsay.turns import read_operator_files, resolve
+from hearsay.turns import read_operator_files, resolve, wall
 
 COOKIE = "hearsay_session"
 SESSION_SECONDS = 30 * 24 * 3600
@@ -39,7 +39,7 @@ SAMPLES = 3
 MIN_TAG_CLUSTER = 3
 
 CLUSTERS_SQL = """
-SELECT tp.turn_id, tp.cluster, t.conversation_id, t.start, t.end, ca.wav_file
+SELECT tp.turn_id, tp.cluster, t.conversation_id, t.start, t.end, ca.wav_file, ca.zero_at
 FROM turn_people tp
 JOIN turns t ON t.turn_id = tp.turn_id
 JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id
@@ -296,19 +296,22 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         turns = grouped[cluster_id]
         heard = samples(turns)
 
-        def spans(chosen):
-            return [{k: s[k] for k in ("turn_id", "conversation_id", "start", "end")} for s in chosen]
+        def spans(chosen) -> dict:
+            # Absolute times, so the tag survives new transcripts and boundaries;
+            # turn ids only for reference.
+            return {"at": [wall(s["zero_at"], s["start"], s["end"]) for s in chosen],
+                    "turn_ids": [s["turn_id"] for s in chosen]}
 
         if action == "mixed":
-            append_tag({"type": "mixed", "turns": spans(heard)})
+            append_tag({"type": "mixed", **spans(heard)})
         elif action == "skip":
-            append_tag({"type": "skip", "turns": spans(heard)})
+            append_tag({"type": "skip", **spans(heard)})
         elif action in ("name", "forget") and (name or action == "forget"):
             # Also retag this cluster's already-tagged turns, so a new name
             # renames the cluster or settles a conflict, and forgetting
             # (a name record with no name) clears every name it carries.
             chosen = heard + [s for s in turns if s["turn_id"] in names and s not in heard]
-            append_tag({"type": "name", "turns": spans(chosen), "name": name if action == "name" else None})
+            append_tag({"type": "name", **spans(chosen), "name": name if action == "name" else None})
         else:
             return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)
         # Next: the first unskipped cluster; skipped ones only come round again

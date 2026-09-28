@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hearsay.assemble import assemble
+from hearsay.conversations import find_conversations
 from hearsay.parse import ParseFailed, rebuild
 from hearsay.people import group_people
 from hearsay.receiver import create_app
@@ -117,6 +118,7 @@ def test_every_real_captured_payload_reprocesses(tmp_path):
     # Real transcripts, when mounted; they only apply if WAVs rebuild byte-identical.
     transcripts = Path(os.environ.get("HEARSAY_CHECK_TRANSCRIPTS_DIR", tmp_path / "no-transcripts"))
     rebuild(raw, db_path)
+    find_conversations(raw, db_path)
     assemble(raw, db_path, tmp_path / "audio")
     build_turns(db_path, transcripts)
     record_operator_input(db_path, tmp_path / "labels")

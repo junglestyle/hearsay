@@ -40,8 +40,7 @@ def portal(tmp_path):
     voices = [unit([rng.gauss(0, 1) for _ in range(192)]) for _ in range(2)]
     db = sqlite3.connect(db_path)
     db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA)
-    db.execute("INSERT INTO conversation_audio VALUES"
-               " ('c1', 'memory/p.body', '2026-01-01T00:00:00+00:00', 'live', 40, 1, 'c1.wav', 'sha')")
+    db.execute("INSERT INTO conversation_audio VALUES ('c1', '2026-01-01T00:00:00+00:00', 40, 1, 'c1.wav', 'sha')")
     for idx in range(8):
         turn_id = f"{'ab'[idx % 2]}{idx}"
         db.execute("INSERT INTO turns VALUES (?,?,?,?,?,?,?,?)",
@@ -92,7 +91,7 @@ def test_naming_in_the_portal_names_the_whole_cluster_after_reprocess(portal):
     response = client.post(f"/cluster/{cluster_a}", data={"action": "name", "name": "  Alice  "}, follow_redirects=False)
     assert response.status_code == 303
     [record] = [json.loads(line) for line in (labels_dir / "tags.jsonl").read_text().splitlines()]
-    assert record["name"] == "Alice" and len(record["turns"]) == 3
+    assert record["name"] == "Alice" and len(record["at"]) == 3
     assert "Alice" in client.get("/").text  # applied immediately, before any reprocess
 
     reprocess_people(db_path, labels_dir)

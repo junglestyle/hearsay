@@ -10,7 +10,7 @@ import pytest
 from hearsay.assemble import assemble
 from hearsay.parse import rebuild
 from hearsay.turns import build_turns
-from test_assemble import T, memory, segment, seconds, write_payload
+from test_assemble import T, add_conversations, seconds, write_payload
 
 pytest.importorskip("speechbrain")
 MODEL_DIR = Path("/models/ecapa")
@@ -65,10 +65,10 @@ def test_segments_of_the_enrolled_voice_score_higher(tmp_path):
         timeline += voice(*(owner if i % 2 == 0 else other), 5, 10 + i)
     stream(raw, timeline, 0)
     (labels_dir / "enrollment.json").write_text(json.dumps([{"start": T.isoformat(), "end": seconds(30).isoformat()}]))
-    segments = [segment(f"s{i}", 5.0 * i, 5.0 * i + 5) for i in range(4)] + [segment("short", 19.0, 19.5)]
-    write_payload(raw, "memory", seconds(90), memory("c", seconds(40), segments), [["uid", "u"]])
 
     rebuild(raw, db_path)
+    # The conversation voice detection would find over [40, 60) s.
+    add_conversations(db_path, [("c", seconds(40).timestamp(), seconds(60).timestamp(), 20.0, 0)])
     assemble(raw, db_path, audio_dir)
     # The transcript the dev box would make: one turn per 5 s voice sample
     # (named by its word), plus a short turn from a third voice.

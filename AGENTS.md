@@ -34,32 +34,29 @@ Downstream consumers read this. They never receive audio.
 
 ## Current slice
 
-Slice 6: local transcription. The dev box (GPU) transcribes and diarizes each
-conversation WAV with WhisperX (`hearsay/transcribe.py`, hourly systemd user
-timer set up by `install/gpu.sh`) and writes transcripts to the NAS. Reprocess
-turns them into speaker turns (`hearsay/turns.py`), and speaker labeling,
-clustering, the portal and the label tool all work on turns, not Omi segments.
+Slice 7: our own conversation boundaries. Reprocess runs voice activity
+detection (Silero, pinned in the worker image) over the continuous audio
+stream (`hearsay/conversations.py`); a conversation ends after 3 minutes
+without speech, and one with under 30 s of speech is dropped. Content is never
+consulted, so there is no length cap; splitting by topic belongs downstream.
+Omi's transcript and memory webhooks still arrive and stay in raw, but
+nothing depends on them.
 
-- A transcript records the sha256 of the WAV it came from and its settings;
-  reprocess uses it only for that exact WAV, so turns always line up with the
-  audio. Conversations without one are pending, with no Omi fallback.
-- Operator input (ear labels, names, mixed, skip) is matched to turns by time
-  span, never by id, so it survives re-transcription. Old records name Omi
-  segment ids and are placed via those segments' times; new records carry
-  their spans.
-- Omi's segments stay in the database as facts, but only conversation
-  windows (memory payloads) still come from Omi, until slice 7.
-- Owner / not-owner labels are per turn (diarization lumped the owner with
-  someone else in 4 of 74 speakers, too often to label short turns by
-  speaker). Clustering of not-owner turns is per diarized speaker: one
-  averaged embedding per speaker per conversation.
-- Speaker thresholds were tuned on Omi segments; re-check them on turns with
-  `python -m hearsay.label report`, after `label review` settles labels the
-  model disagrees with.
+- Conversation ids are `c` + the UTC time of the first speech, so they stay
+  stable while a conversation grows. One still going when the audio stops is
+  marked open; the next reprocess extends it and the dev box re-transcribes.
+- Operator input is matched to turns by absolute time. New records store
+  `at` spans (UTC); older ones point into Omi's timeline (segment ids, or
+  spans relative to an Omi conversation) and are placed via
+  `turns.omi_timeline`, recomputed from raw. Records that fall outside every
+  conversation are kept and simply match nothing.
+- Short self-notes (under 30 s of speech) are dropped for now; the plan is to
+  capture them with the pendant button once the own capture app exists
+  (slice 9).
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when every conversation's utterances come from our own transcription,
-and past labels and names still apply.
+Done when conversations are found without any Omi transcript or memory
+payload, including ones Omi never sent.
 
 ## Engineering style
 

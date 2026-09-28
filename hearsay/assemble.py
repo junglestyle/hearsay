@@ -1,18 +1,15 @@
 """Cut per-conversation WAV files out of the continuous audio stream.
 
-Reads the database built by parse.rebuild and the raw audio bodies. Writes one
-WAV per conversation plus the conversation_audio table. Everything here is
-derived from raw and is rebuilt on every run.
+Reads the conversations found in the stream (hearsay/conversations.py) and
+the raw audio bodies. Writes one WAV per conversation plus the
+conversation_audio table. Everything here is derived from raw and is rebuilt
+on every run.
 
-Timing rules below were measured on real captures:
-- Omi posts audio in bursts: 5-6 s of audio as 1 s chunks ~0.09 s apart.
-  Consecutive bursts are nearly always contiguous audio, and receipt time
-  jitters by about +/-0.5 s, so bursts are laid end to end and only
-  re-anchored to receipt time when the two disagree, which means audio was lost.
-- Segment start/end count from Omi's live transcription session, which is not
-  always the memory's started_at (off by up to 31 min). The session start is
-  estimated from live transcript arrival: arrival - segment end, minimised
-  over the conversation's segments, then shifted by a measured offset.
+Omi posts audio in bursts: 5-6 s of audio as 1 s chunks ~0.09 s apart
+(measured on real captures). Consecutive bursts are nearly always contiguous
+audio, and receipt time jitters by about +/-0.5 s, so bursts are laid end to
+end and only re-anchored to receipt time when the two disagree, which means
+audio was lost.
 """
 
 import hashlib
@@ -29,20 +26,14 @@ BURST_GAP = 1.5
 # When contiguous placement and receipt-time placement differ by more than
 # this, audio was lost (or duplicated); trust receipt time.
 REANCHOR = 2.0
-# Correction to the live-arrival estimate of segment time 0. Measured by
-# matching loudness in assembled WAVs to segments on five real conversations
-# with a clear match; they scatter about +/-1.5 s around it.
-LIVE_ARRIVAL_OFFSET = -0.5
 
 SCHEMA = """
 DROP TABLE IF EXISTS conversation_audio;
--- One row per conversation with a memory payload (the latest one).
+-- One row per conversation.
 CREATE TABLE conversation_audio (
-    conversation_id TEXT PRIMARY KEY,
-    memory_path TEXT NOT NULL REFERENCES payloads(path),
-    zero_at TEXT NOT NULL,           -- wall time (UTC) of segment time 0
-    zero_source TEXT NOT NULL,       -- live (transcript arrival) | started_at
-    duration REAL NOT NULL,          -- seconds, up to the last segment's end
+    conversation_id TEXT PRIMARY KEY REFERENCES conversations(conversation_id),
+    zero_at TEXT NOT NULL,           -- wall time (UTC) where the WAV starts
+    duration REAL NOT NULL,          -- seconds
     coverage REAL NOT NULL,          -- fraction of duration with received audio
     wav_file TEXT,                   -- relative to the audio dir; NULL if no audio
     wav_sha256 TEXT                  -- transcripts are only used for this exact WAV
@@ -85,20 +76,6 @@ def place_bursts(db: sqlite3.Connection) -> list[tuple[float, float, list[str]]]
     return placed
 
 
-def zero_point(db: sqlite3.Connection, memory_path: str, started_at: str) -> tuple[float, str]:
-    # Live copies of this memory's segments, matched by segment id.
-    live = db.execute(
-        "SELECT lp.received_at, ls.end FROM segments ms"
-        " JOIN segments ls ON ls.segment_id = ms.segment_id"
-        " JOIN payloads lp ON lp.path = ls.payload_path"
-        " WHERE ms.payload_path = ? AND lp.type = 'transcript'",
-        (memory_path,),
-    ).fetchall()
-    if not live:
-        return timestamp(started_at), "started_at"
-    return min(timestamp(received_at) - end for received_at, end in live) + LIVE_ARRIVAL_OFFSET, "live"
-
-
 def cut(raw_dir: Path, bursts: list, start: float, duration: float) -> tuple[bytes, float]:
     """PCM for [start, start + duration), silence where no audio arrived."""
     total = round(duration * SAMPLE_RATE)
@@ -134,44 +111,29 @@ def assemble(raw_dir: Path, db_path: Path, audio_dir: Path) -> dict:
     db = sqlite3.connect(db_path)
     try:
         bursts = place_bursts(db)
-        latest = {}  # conversation_id -> (memory_path, started_at), latest memory wins
-        for conversation_id, path, started_at in db.execute(
-            "SELECT m.conversation_id, m.payload_path, m.started_at FROM memories m"
-            " JOIN payloads p ON p.path = m.payload_path ORDER BY p.received_at, p.path"
-        ):
-            latest[conversation_id] = (path, started_at)
-
         rows = []
-        for conversation_id, (memory_path, started_at) in sorted(latest.items()):
-            duration = db.execute(
-                "SELECT MAX(end) FROM segments WHERE payload_path = ?", (memory_path,)
-            ).fetchone()[0]
-            if not duration or duration <= 0:
-                continue
-            zero, source = zero_point(db, memory_path, started_at)
-            pcm, coverage = cut(raw_dir, bursts, zero, duration)
+        for conversation_id, start, end in db.execute(
+            "SELECT conversation_id, start, end FROM conversations ORDER BY start"
+        ).fetchall():
+            pcm, coverage = cut(raw_dir, bursts, start, end - start)
             wav_file = wav_sha256 = None
             if coverage > 0:
                 wav_file = f"{conversation_id}.wav"
                 write_wav(audio_dir / wav_file, pcm)
                 wav_sha256 = hashlib.sha256((audio_dir / wav_file).read_bytes()).hexdigest()
-            zero_at = datetime.fromtimestamp(zero, timezone.utc).isoformat()
-            rows.append((conversation_id, memory_path, zero_at, source, duration, coverage, wav_file, wav_sha256))
+            zero_at = datetime.fromtimestamp(start, timezone.utc).isoformat()
+            rows.append((conversation_id, zero_at, end - start, coverage, wav_file, wav_sha256))
 
         db.executescript(SCHEMA)
-        db.executemany("INSERT INTO conversation_audio VALUES (?,?,?,?,?,?,?,?)", rows)
+        db.executemany("INSERT INTO conversation_audio VALUES (?,?,?,?,?,?)", rows)
         db.commit()
     finally:
         db.close()
 
     # WAVs are derived: remove any this run didn't produce.
-    current = {r[6] for r in rows if r[6]}
+    current = {r[4] for r in rows if r[4]}
     for wav in audio_dir.glob("*.wav"):
         if wav.name not in current:
             wav.unlink()
 
-    return {
-        "conversations": len(rows),
-        "with_audio": len(current),
-        "zero_from_live": sum(1 for r in rows if r[3] == "live"),
-    }
+    return {"conversations": len(rows), "with_audio": len(current)}

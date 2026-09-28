@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 
 from hearsay.people import CLUSTER_THRESHOLD
 from hearsay.speakers import NOT_OWNER_THRESHOLD, OWNER_THRESHOLD
+from hearsay.turns import wall
 
 NAS = "nas"
 DB = "/mnt/storage/hearsay/db/hearsay.sqlite"
@@ -37,7 +38,7 @@ ENROLLMENT = "/mnt/storage/hearsay/labels/enrollment.json"
 ANSWERS = {"m": "owner", "n": "not_owner", "u": "unsure"}
 
 CANDIDATES_SQL = """
-SELECT t.turn_id, t.conversation_id, t.start, t.end, ts.owner_similarity, ca.wav_file
+SELECT t.turn_id, t.conversation_id, t.start, t.end, ts.owner_similarity, ca.wav_file, ca.zero_at
 FROM turn_speakers ts
 JOIN turns t ON t.turn_id = ts.turn_id
 JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id
@@ -133,9 +134,11 @@ def ask(turn: dict) -> str | None:
 
 
 def save_label(turn: dict, label: str) -> None:
-    # The span, not just the id, so the label survives re-transcription.
+    # Absolute times, so the label survives new transcripts and boundaries;
+    # the turn id only for reference.
     record = {
-        "turns": [{k: turn[k] for k in ("turn_id", "conversation_id", "start", "end")}],
+        "at": [wall(turn["zero_at"], turn["start"], turn["end"])],
+        "turn_ids": [turn["turn_id"]],
         "label": label,
         "labeled_at": datetime.now(timezone.utc).isoformat(),
     }

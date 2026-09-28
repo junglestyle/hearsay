@@ -1,4 +1,5 @@
-"""Rebuild everything derived from raw: database, conversation audio, turns, speaker labels, people.
+"""Rebuild everything derived from raw: database, conversations, conversation
+audio, turns, speaker labels, people.
 
 Turns come from transcripts the dev box makes of each WAV (hearsay/transcribe.py),
 so new audio needs a reprocess, a transcription run, then another reprocess.
@@ -10,9 +11,10 @@ import sys
 from pathlib import Path
 
 from hearsay.assemble import assemble
+from hearsay.conversations import find_conversations
 from hearsay.parse import ParseFailed, rebuild
 from hearsay.people import group_people
-from hearsay import people, speakers
+from hearsay import conversations, people, speakers
 from hearsay.speakers import label_speakers
 from hearsay.turns import build_turns, record_operator_input
 
@@ -32,6 +34,11 @@ def main() -> None:
         sys.exit(1)
     print(f"Rebuilt {db_path} from {raw_dir}:")
     for name, n in parsed.items():
+        print(f"  {name}: {n}")
+
+    found_conversations = find_conversations(raw_dir, db_path)
+    print("Conversations found in the audio stream:")
+    for name, n in found_conversations.items():
         print(f"  {name}: {n}")
 
     assembled = assemble(raw_dir, db_path, audio_dir)
@@ -66,6 +73,8 @@ def record_run(db_path: Path) -> None:
     """Record what produced this database, so a stale image is easy to spot."""
     info = {
         "commit": os.environ.get("HEARSAY_COMMIT", "unknown"),
+        "conversation_gap": conversations.GAP,
+        "min_speech": conversations.MIN_SPEECH,
         "min_turn": speakers.MIN_TURN,
         "owner_threshold": speakers.OWNER_THRESHOLD,
         "not_owner_threshold": speakers.NOT_OWNER_THRESHOLD,
