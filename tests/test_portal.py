@@ -133,3 +133,20 @@ def test_skipped_clusters_go_to_the_back_of_the_queue(portal):
 
     named = client.post(f"/cluster/{second}", data={"action": "name", "name": "Bob"}, follow_redirects=False)
     assert named.headers["location"] == f"/cluster/{first}"  # comes round again once the rest is done
+
+
+def test_forgetting_a_name_unnames_the_cluster(portal):
+    client, db_path, labels_dir = portal
+    log_in(client)
+    db = sqlite3.connect(db_path)
+    cluster_a = db.execute("SELECT cluster FROM turn_people WHERE turn_id = 'a0'").fetchone()[0]
+    db.close()
+
+    client.post(f"/cluster/{cluster_a}", data={"action": "name", "name": "Alice"})
+    client.post(f"/cluster/{cluster_a}", data={"action": "forget"})
+    assert "To name (2)" in client.get("/").text
+
+    reprocess_people(db_path, labels_dir)
+    db = sqlite3.connect(db_path)
+    assert db.execute("SELECT DISTINCT person FROM turn_people").fetchall() == [(None,)]
+    db.close()

@@ -147,8 +147,10 @@ def resolve(db: sqlite3.Connection, labels_text: str, tags_text: str) -> Operato
     for line in tags_text.splitlines():
         record = json.loads(line)
         for turn_id in covered(record):
-            if record["type"] == "name":
+            if record["type"] == "name" and record["name"]:
                 result.names[turn_id] = record["name"]
+            elif record["type"] == "name":
+                result.names.pop(turn_id, None)  # the operator took a name back
             elif record["type"] == "mixed":
                 result.mixed.add(turn_id)
             elif record["type"] == "skip":

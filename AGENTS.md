@@ -48,8 +48,13 @@ clustering, the portal and the label tool all work on turns, not Omi segments.
   their spans.
 - Omi's segments stay in the database as facts, but only conversation
   windows (memory payloads) still come from Omi, until slice 7.
+- Owner / not-owner labels are per turn (diarization lumped the owner with
+  someone else in 4 of 74 speakers, too often to label short turns by
+  speaker). Clustering of not-owner turns is per diarized speaker: one
+  averaged embedding per speaker per conversation.
 - Speaker thresholds were tuned on Omi segments; re-check them on turns with
-  `python -m hearsay.label report`.
+  `python -m hearsay.label report`, after `label review` settles labels the
+  model disagrees with.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
 Done when every conversation's utterances come from our own transcription,

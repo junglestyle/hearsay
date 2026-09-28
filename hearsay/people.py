@@ -11,11 +11,13 @@ import sqlite3
 from array import array
 from pathlib import Path
 
-# Average-linkage cosine similarity at which two groups are the same speaker.
-# Provisional starting point (2026-09-27, 307 real not-owner segments): 0.45
-# left 70 singletons in 107 clusters; 0.40 gives 81 clusters, the largest
-# 100/36/18. Tune with `python -m hearsay.label report` as recurring people
-# appear: many "mixed" clusters, raise it; one person over many clusters, lower it.
+# Average-linkage cosine similarity at which two speakers are the same person.
+# Clustering whole diarized speakers (one averaged embedding per speaker per
+# conversation), not single turns: on 662 real not-owner turns (2026-09-28)
+# per-turn clustering at 0.40 gave 189 clusters with named people split three
+# ways; per-speaker gave 21, each named person in one, and no clusters mixing
+# names. Tune with `python -m hearsay.label report`: many "mixed" clusters,
+# raise it; one person over many clusters, lower it.
 CLUSTER_THRESHOLD = 0.40
 
 SCHEMA = """
@@ -47,18 +49,41 @@ def cluster(vectors) -> list[int]:
     return list(fcluster(tree, t=1 - CLUSTER_THRESHOLD, criterion="distance"))
 
 
+def speaker_vectors(rows) -> tuple[list[list[str]], list[list[float]]]:
+    """One averaged, unit-length embedding per diarized speaker per conversation.
+
+    A speaker's turns together embed far more steadily than any single short
+    turn. Turns whose words got no diarized speaker stand alone.
+    """
+    groups = {}
+    for turn_id, conversation_id, diar_speaker, embedding in rows:
+        key = (conversation_id, diar_speaker) if diar_speaker else (conversation_id, turn_id)
+        groups.setdefault(key, []).append((turn_id, list(array("f", embedding))))
+    members, vectors = [], []
+    for key in sorted(groups, key=lambda k: (k[0], k[1] or "")):
+        group = groups[key]
+        mean = [sum(column) / len(group) for column in zip(*(v for _, v in group))]
+        norm = sum(x * x for x in mean) ** 0.5
+        members.append([turn_id for turn_id, _ in group])
+        vectors.append([x / norm for x in mean])
+    return members, vectors
+
+
 def group_people(db_path: Path) -> dict:
     db = sqlite3.connect(db_path)
     try:
         names = dict(db.execute("SELECT turn_id, value FROM operator_input WHERE kind = 'name'"))
+        # Only turns already labeled not_owner: the owner's voice never joins a
+        # cluster, even when diarization lumps it in with someone else's.
         rows = db.execute(
-            "SELECT turn_id, embedding FROM turn_speakers WHERE label = 'not_owner' ORDER BY turn_id"
+            "SELECT ts.turn_id, t.conversation_id, t.diar_speaker, ts.embedding FROM turn_speakers ts"
+            " JOIN turns t ON t.turn_id = ts.turn_id WHERE ts.label = 'not_owner' ORDER BY ts.turn_id"
         ).fetchall()
-        assignments = cluster([list(array("f", embedding)) for _, embedding in rows])
+        speakers, vectors = speaker_vectors(rows)
 
         members = {}
-        for (turn_id, _), c in zip(rows, assignments):
-            members.setdefault(c, []).append(turn_id)
+        for turn_ids, c in zip(speakers, cluster(vectors)):
+            members.setdefault(c, []).extend(turn_ids)
 
         out = []
         for turn_ids in members.values():

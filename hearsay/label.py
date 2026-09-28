@@ -8,6 +8,7 @@ appended to the labels dir on the NAS and never rebuilt or overwritten.
 
     python -m hearsay.label enroll START END   # add an enrollment window
     python -m hearsay.label                    # label turns me / not me, blind
+    python -m hearsay.label review             # re-hear labels the model disagrees with
     python -m hearsay.label report             # precision/recall, cluster health
 
 START and END are ISO-8601 times, e.g. 2026-09-27T10:05; without a UTC
@@ -109,29 +110,72 @@ def pick(unlabeled: list[dict]) -> dict:
     return min(scored, key=lambda s: abs(s["owner_similarity"] - target))
 
 
+def ask(turn: dict) -> str | None:
+    """Play a turn and return the operator's label, or None to stop."""
+    print(f"\n{turn['end'] - turn['start']:.1f} s")
+    play(turn)
+    answer = ""
+    while answer not in ANSWERS and answer != "s":
+        answer = input("> ").strip().lower()
+        if answer == "q":
+            return None
+        if answer == "r":
+            play(turn)
+    return "skip" if answer == "s" else ANSWERS[answer]
+
+
+def save_label(turn: dict, label: str) -> None:
+    # The span, not just the id, so the label survives re-transcription.
+    record = {
+        "turns": [{k: turn[k] for k in ("turn_id", "conversation_id", "start", "end")}],
+        "label": label,
+        "labeled_at": datetime.now(timezone.utc).isoformat(),
+    }
+    ssh(["sh", "-c", f"'cat >> {LABELS}'"], (json.dumps(record) + "\n").encode())
+
+
+def review_loop() -> None:
+    """Re-hear labeled turns the model disagrees with, most confident disagreement first.
+
+    Either the label or the model is wrong; a fresh listen settles which, and
+    a new answer replaces the old one (the latest label for a turn wins).
+    """
+    labeled = existing_labels()
+    disagreements = []
+    for turn in candidates():
+        label, sim = labeled.get(turn["turn_id"]), turn["owner_similarity"]
+        if sim is None:
+            continue
+        if label == "owner" and sim < OWNER_THRESHOLD:
+            disagreements.append((OWNER_THRESHOLD - sim, turn))
+        elif label == "not_owner" and sim > NOT_OWNER_THRESHOLD:
+            disagreements.append((sim - NOT_OWNER_THRESHOLD, turn))
+    disagreements.sort(key=lambda d: -d[0])
+    print(f"{len(disagreements)} labels the model disagrees with. Answer fresh; your old answer isn't shown.")
+    print("m = me, n = not me, u = unsure, s = keep my old answer, r = replay, q = quit")
+    changed = 0
+    for _, turn in disagreements:
+        answer = ask(turn)
+        if answer is None:
+            break
+        if answer != "skip":
+            save_label(turn, answer)
+            changed += answer != labeled[turn["turn_id"]]
+    print(f"\n{changed} label(s) changed. Reprocess on the NAS, then run `report`.")
+
+
 def label_loop() -> None:
     labeled = existing_labels()
     unlabeled = [s for s in candidates() if s["turn_id"] not in labeled]
     print(f"{len(labeled)} labeled, {len(unlabeled)} to go.")
-    print("m = me, n = not me, u = unsure, r = replay, q = quit")
+    print("m = me, n = not me, u = unsure, s = skip, r = replay, q = quit")
     while unlabeled:
         turn = pick(unlabeled)
-        print(f"\n{turn['end'] - turn['start']:.1f} s")
-        play(turn)
-        answer = ""
-        while answer not in ANSWERS:
-            answer = input("> ").strip().lower()
-            if answer == "q":
-                return
-            if answer == "r":
-                play(turn)
-        # The span, not just the id, so the label survives re-transcription.
-        record = {
-            "turns": [{k: turn[k] for k in ("turn_id", "conversation_id", "start", "end")}],
-            "label": ANSWERS[answer],
-            "labeled_at": datetime.now(timezone.utc).isoformat(),
-        }
-        ssh(["sh", "-c", f"'cat >> {LABELS}'"], (json.dumps(record) + "\n").encode())
+        answer = ask(turn)
+        if answer is None:
+            return
+        if answer != "skip":
+            save_label(turn, answer)
         unlabeled.remove(turn)
 
 
@@ -218,6 +262,8 @@ if __name__ == "__main__":
         enroll(sys.argv[2], sys.argv[3])
     elif sys.argv[1:] == ["report"]:
         report()
+    elif sys.argv[1:] == ["review"]:
+        review_loop()
     elif not sys.argv[1:]:
         label_loop()
     else:

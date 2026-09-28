@@ -83,7 +83,10 @@ which reprocessing reads but never writes. From the repo on the dev box:
 2. Reprocess on the NAS (above).
 3. Label segments by ear: `.venv/bin/python -m hearsay.label` (plays audio
    locally, over `ssh nas`).
-4. See precision per threshold: `.venv/bin/python -m hearsay.label report`,
+4. Re-hear the labels the model disagrees with, answering fresh:
+   `.venv/bin/python -m hearsay.label review`. Answer `u` whenever you can't
+   tell; a guess does more harm than no label.
+5. See precision per threshold: `.venv/bin/python -m hearsay.label report`,
    then set `OWNER_THRESHOLD` / `NOT_OWNER_THRESHOLD` in
    [`hearsay/speakers.py`](hearsay/speakers.py), deploy, and reprocess.
 
@@ -94,7 +97,9 @@ them in the web portal that `nas.sh` starts, at the addresses it prints. It
 listens on the LAN and tailnet only, so from your phone use the tailnet
 address. Each cluster plays a few samples. Type a name (reusing a name merges
 into that person), mark it as more than one person, or skip it for now: skipped
-clusters move to their own list and come round again after the rest.
+clusters move to their own list and come round again after the rest. If you
+can't tell who it is (noise, several voices), skip rather than guess. A named
+cluster can be renamed, or its name forgotten, from its page.
 
 Names are stored on the segments you heard, in `/mnt/storage/hearsay/labels/`,
 so they survive reclustering and apply to every past conversation. The portal

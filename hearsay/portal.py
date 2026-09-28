@@ -265,6 +265,8 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             for s in samples(turns)
         )
         known = "".join(f"<option value='{html.escape(n)}'>" for n in sorted(set(names.values())))
+        forget = ("<button type='submit' name='action' value='forget' formnovalidate>Forget this name</button>"
+                  if person or conflict else "")
         return page("Hearsay cluster", f"""
 <p><a href="/">← Speakers</a></p>
 <h1>{len(turns)} turns</h1>
@@ -277,6 +279,7 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
   <button type="submit" name="action" value="name">Save name</button>
   <button type="submit" name="action" value="mixed">More than one person</button>
   <button type="submit" name="action" value="skip" formnovalidate>Skip for now</button>
+  {forget}
 </form>""")
 
     @app.post("/cluster/{cluster_id}")
@@ -300,11 +303,12 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             append_tag({"type": "mixed", "turns": spans(heard)})
         elif action == "skip":
             append_tag({"type": "skip", "turns": spans(heard)})
-        elif action == "name" and name:
+        elif action in ("name", "forget") and (name or action == "forget"):
             # Also retag this cluster's already-tagged turns, so a new name
-            # renames the cluster or settles a conflict.
+            # renames the cluster or settles a conflict, and forgetting
+            # (a name record with no name) clears every name it carries.
             chosen = heard + [s for s in turns if s["turn_id"] in names and s not in heard]
-            append_tag({"type": "name", "turns": spans(chosen), "name": name})
+            append_tag({"type": "name", "turns": spans(chosen), "name": name if action == "name" else None})
         else:
             return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)
         # Next: the first unskipped cluster; skipped ones only come round again
