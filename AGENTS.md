@@ -19,8 +19,9 @@ Downstream consumers read this. They never receive audio.
 - Raw webhook payloads are written to disk verbatim before any parsing.
   Never modify or delete raw payloads as part of processing.
 - Audio never leaves Hearsay. Hearsay's boundary is the operator's home LAN
-  and Tailscale tailnet: the NAS, the dev box (which has the GPU), and the
-  operator's phone. Audio, including non-owner audio, may move between them.
+  and Tailscale tailnet: the NAS, the dev box (which has the GPU), the
+  operator's Mac laptop, and the operator's phone. Audio, including non-owner
+  audio, may move between them.
   It is never exposed on the public internet (the Cloudflare tunnel carries
   only the receiver) and never goes to third-party services or downstream
   consumers.
