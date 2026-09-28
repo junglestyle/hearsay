@@ -1,0 +1,179 @@
+"""Speaker turns from our own transcripts, and the operator's input resolved onto them.
+
+Transcripts are WhisperX output made on the dev box (hearsay/transcribe.py)
+from a conversation's WAV. A transcript is used only if it was made from the
+exact WAV reprocess just assembled (same sha256); otherwise the conversation
+is pending until the dev box redoes it. Turn times are offsets into that WAV,
+so they line up with the audio by construction.
+
+The operator's labels and names are durable input that must survive
+re-transcription, so they are matched to turns by time, not by id. Older
+records name Omi segment ids and are placed via those segments' times; newer
+records carry their own spans. A turn inherits a record when the record's
+span covers at least half of the turn.
+"""
+
+import json
+import sqlite3
+from pathlib import Path
+from typing import NamedTuple
+
+# A pause this long starts a new turn even when the speaker doesn't change.
+MAX_GAP = 2.0
+# Fraction of a turn a labeled span must cover for the turn to inherit it.
+MIN_COVER = 0.5
+
+SCHEMA = """
+DROP TABLE IF EXISTS turns;
+DROP TABLE IF EXISTS operator_input;
+-- Consecutive words from one diarized speaker, from our own transcript.
+CREATE TABLE turns (
+    turn_id TEXT PRIMARY KEY,        -- conversation_id:idx; changes if the transcript changes
+    conversation_id TEXT NOT NULL,
+    idx INTEGER NOT NULL,
+    start REAL NOT NULL,             -- seconds into the conversation WAV
+    end REAL NOT NULL,
+    text TEXT NOT NULL,
+    diar_speaker TEXT,               -- WhisperX speaker within this conversation only
+    confidence REAL                  -- mean word alignment score, NULL if no word was aligned
+);
+-- The operator's labels and tags as they apply to the current turns.
+CREATE TABLE operator_input (
+    turn_id TEXT NOT NULL,
+    kind TEXT NOT NULL,              -- label | name | mixed | skip
+    value TEXT                       -- owner / not_owner / unsure for label, the name for name
+);
+"""
+
+
+class OperatorInput(NamedTuple):
+    labels: dict[str, str]           # turn_id -> owner | not_owner | unsure
+    names: dict[str, str]            # turn_id -> name
+    mixed: set[str]
+    skipped: set[str]
+
+
+def split_turns(segments: list[dict]) -> list[dict]:
+    """Group aligned words into turns: a new turn at each speaker change or long pause."""
+    turns, pending = [], []  # pending: words without timestamps, before any timed word
+    for segment in segments:
+        words = segment.get("words") or []
+        if not words:
+            # Alignment failed for the whole segment: keep it as one turn.
+            turns.append({"start": segment["start"], "end": segment["end"], "words": [segment["text"].strip()],
+                          "speaker": segment.get("speaker"), "scores": []})
+            continue
+        for w in words:
+            if "start" not in w or "end" not in w:
+                # Numbers and symbols often get no timestamp; they belong to the current turn.
+                (turns[-1]["words"] if turns else pending).append(w["word"])
+                continue
+            speaker = w.get("speaker", segment.get("speaker"))
+            current = turns[-1] if turns else None
+            if current is None or speaker != current["speaker"] or w["start"] - current["end"] > MAX_GAP:
+                turns.append({"start": w["start"], "end": w["end"], "words": pending + [w["word"]],
+                              "speaker": speaker, "scores": []})
+                pending = []
+            else:
+                current["end"] = w["end"]
+                current["words"].append(w["word"])
+            if "score" in w:
+                turns[-1]["scores"].append(w["score"])
+    return turns
+
+
+def build_turns(db_path: Path, transcripts_dir: Path) -> dict:
+    db = sqlite3.connect(db_path)
+    counts = {"conversations": 0, "transcribed": 0, "pending": 0, "turns": 0}
+    try:
+        db.executescript(SCHEMA)
+        for conversation_id, wav_sha256 in db.execute(
+            "SELECT conversation_id, wav_sha256 FROM conversation_audio WHERE wav_file IS NOT NULL ORDER BY conversation_id"
+        ).fetchall():
+            counts["conversations"] += 1
+            path = transcripts_dir / f"{conversation_id}.json"
+            transcript = json.loads(path.read_text()) if path.exists() else None
+            if transcript is None or transcript["wav_sha256"] != wav_sha256:
+                counts["pending"] += 1
+                continue
+            counts["transcribed"] += 1
+            for idx, turn in enumerate(split_turns(transcript["segments"])):
+                confidence = sum(turn["scores"]) / len(turn["scores"]) if turn["scores"] else None
+                db.execute(
+                    "INSERT INTO turns VALUES (?,?,?,?,?,?,?,?)",
+                    (f"{conversation_id}:{idx:04d}", conversation_id, idx, turn["start"], turn["end"],
+                     " ".join(turn["words"]), turn["speaker"], confidence),
+                )
+                counts["turns"] += 1
+        db.commit()
+    finally:
+        db.close()
+    return counts
+
+
+def resolve(db: sqlite3.Connection, labels_text: str, tags_text: str) -> OperatorInput:
+    """The operator's labels and tags, matched to the current turns by time."""
+    # Where the Omi segments named by older records sit, on the same timeline as the WAV.
+    legacy = {
+        segment_id: (conversation_id, start, end)
+        for segment_id, conversation_id, start, end in db.execute(
+            "SELECT s.segment_id, ca.conversation_id, s.start, s.end"
+            " FROM conversation_audio ca JOIN segments s ON s.payload_path = ca.memory_path"
+        )
+    }
+    by_conversation = {}
+    for turn_id, conversation_id, start, end in db.execute("SELECT turn_id, conversation_id, start, end FROM turns"):
+        by_conversation.setdefault(conversation_id, []).append((turn_id, start, end))
+
+    def covered(record: dict) -> list[str]:
+        if "turns" in record:
+            spans = [(t["conversation_id"], t["start"], t["end"]) for t in record["turns"]]
+        else:
+            ids = record.get("segment_ids") or ([record["segment_id"]] if "segment_id" in record else [])
+            spans = [legacy[i] for i in ids if i in legacy]
+        hits = []
+        for conversation_id, start, end in spans:
+            for turn_id, t_start, t_end in by_conversation.get(conversation_id, []):
+                overlap = min(end, t_end) - max(start, t_start)
+                if t_end > t_start and overlap >= MIN_COVER * (t_end - t_start):
+                    hits.append(turn_id)
+        return hits
+
+    result = OperatorInput({}, {}, set(), set())
+    for line in labels_text.splitlines():
+        record = json.loads(line)
+        for turn_id in covered(record):
+            result.labels[turn_id] = record["label"]
+    for line in tags_text.splitlines():
+        record = json.loads(line)
+        for turn_id in covered(record):
+            if record["type"] == "name":
+                result.names[turn_id] = record["name"]
+            elif record["type"] == "mixed":
+                result.mixed.add(turn_id)
+            elif record["type"] == "skip":
+                result.skipped.add(turn_id)
+    return result
+
+
+def read_operator_files(labels_dir: Path) -> tuple[str, str]:
+    def text(name: str) -> str:
+        path = labels_dir / name
+        return path.read_text() if path.exists() else ""
+
+    return text("labels.jsonl"), text("tags.jsonl")
+
+
+def record_operator_input(db_path: Path, labels_dir: Path) -> dict:
+    """Materialize the resolved input, for reprocess steps and the report."""
+    db = sqlite3.connect(db_path)
+    try:
+        found = resolve(db, *read_operator_files(labels_dir))
+        rows = [(t, "label", v) for t, v in found.labels.items()]
+        rows += [(t, "name", v) for t, v in found.names.items()]
+        rows += [(t, "mixed", None) for t in found.mixed] + [(t, "skip", None) for t in found.skipped]
+        db.executemany("INSERT INTO operator_input VALUES (?,?,?)", sorted(rows, key=lambda r: (r[0], r[1])))
+        db.commit()
+    finally:
+        db.close()
+    return {"labeled_turns": len(found.labels), "named_turns": len(found.names)}

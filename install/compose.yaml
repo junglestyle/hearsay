@@ -58,11 +58,13 @@ services:
       HEARSAY_DB: /data/db/hearsay.sqlite
       HEARSAY_AUDIO_DIR: /data/audio
       HEARSAY_LABELS_DIR: /data/labels
+      HEARSAY_TRANSCRIPTS_DIR: /data/transcripts
     volumes:
       - /mnt/storage/hearsay/raw:/data/raw:ro
       - /mnt/storage/hearsay/db:/data/db
       - /mnt/storage/hearsay/audio:/data/audio
       - /mnt/storage/hearsay/labels:/data/labels:ro
+      - /mnt/storage/hearsay/transcripts:/data/transcripts:ro
     command: ["python", "-m", "hearsay.reprocess"]
 
   # One-shot: the test suite, including the check that every real capture reprocesses.
@@ -78,6 +80,8 @@ services:
     network_mode: none
     environment:
       HEARSAY_CHECK_RAW_DIR: /data/raw
+      HEARSAY_CHECK_TRANSCRIPTS_DIR: /data/transcripts
     volumes:
       - /mnt/storage/hearsay/raw:/data/raw:ro
+      - /mnt/storage/hearsay/transcripts:/data/transcripts:ro
     command: ["pytest", "-q", "-p", "no:cacheprovider", "/tests"]

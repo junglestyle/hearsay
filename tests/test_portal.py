@@ -15,6 +15,7 @@ from hearsay.parse import SCHEMA as PARSE_SCHEMA  # noqa: E402
 from hearsay.people import group_people  # noqa: E402
 from hearsay.portal import create_app  # noqa: E402
 from hearsay.speakers import SCHEMA as SPEAKERS_SCHEMA  # noqa: E402
+from hearsay.turns import SCHEMA as TURNS_SCHEMA, record_operator_input  # noqa: E402
 
 
 def unit(vector):
@@ -24,7 +25,7 @@ def unit(vector):
 
 @pytest.fixture
 def portal(tmp_path):
-    """Two not-owner voices, four 4 s segments each, in one conversation WAV."""
+    """Two not-owner voices, four 4 s turns each, in one conversation WAV."""
     db_path, audio_dir, labels_dir = tmp_path / "h.sqlite", tmp_path / "audio", tmp_path / "labels"
     audio_dir.mkdir()
     labels_dir.mkdir()
@@ -38,21 +39,28 @@ def portal(tmp_path):
     rng = random.Random(0)
     voices = [unit([rng.gauss(0, 1) for _ in range(192)]) for _ in range(2)]
     db = sqlite3.connect(db_path)
-    db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + SPEAKERS_SCHEMA)
-    db.execute("INSERT INTO conversation_audio VALUES ('c1', 'memory/p.body', '2026-01-01T00:00:00+00:00', 'live', 40, 1, 'c1.wav')")
+    db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA)
+    db.execute("INSERT INTO conversation_audio VALUES"
+               " ('c1', 'memory/p.body', '2026-01-01T00:00:00+00:00', 'live', 40, 1, 'c1.wav', 'sha')")
     for idx in range(8):
-        segment_id = f"{'ab'[idx % 2]}{idx}"
-        db.execute("INSERT INTO segments (payload_path, idx, segment_id, start, end, text) VALUES (?,?,?,?,?,?)",
-                   ("memory/p.body", idx, segment_id, 5.0 * idx, 5.0 * idx + 4, "synthetic"))
+        turn_id = f"{'ab'[idx % 2]}{idx}"
+        db.execute("INSERT INTO turns VALUES (?,?,?,?,?,?,?,?)",
+                   (turn_id, "c1", idx, 5.0 * idx, 5.0 * idx + 4, "synthetic", None, None))
         vector = unit([x + rng.gauss(0, 0.04) for x in voices[idx % 2]])
-        db.execute("INSERT INTO segment_speakers VALUES (?,?,?,?,?,?,?,?)",
-                   ("memory/p.body", idx, segment_id, "c1", 1.0, array("f", vector).tobytes(), 0.0, "not_owner"))
+        db.execute("INSERT INTO turn_speakers VALUES (?,?,?,?,?,?)",
+                   (turn_id, "c1", 1.0, array("f", vector).tobytes(), 0.0, "not_owner"))
     db.commit()
     db.close()
-    group_people(db_path, labels_dir)
+    reprocess_people(db_path, labels_dir)
 
     app = create_app(db_path, audio_dir, labels_dir, "me", "correct horse", "k" * 64)
     return TestClient(app), db_path, labels_dir
+
+
+def reprocess_people(db_path, labels_dir):
+    """The reprocess steps that apply the operator's tags."""
+    record_operator_input(db_path, labels_dir)
+    group_people(db_path)
 
 
 def log_in(client):
@@ -78,27 +86,27 @@ def test_naming_in_the_portal_names_the_whole_cluster_after_reprocess(portal):
     client, db_path, labels_dir = portal
     log_in(client)
     db = sqlite3.connect(db_path)
-    cluster_a = db.execute("SELECT cluster FROM segment_people WHERE segment_id = 'a0'").fetchone()[0]
+    cluster_a = db.execute("SELECT cluster FROM turn_people WHERE turn_id = 'a0'").fetchone()[0]
     db.close()
 
     response = client.post(f"/cluster/{cluster_a}", data={"action": "name", "name": "  Alice  "}, follow_redirects=False)
     assert response.status_code == 303
     [record] = [json.loads(line) for line in (labels_dir / "tags.jsonl").read_text().splitlines()]
-    assert record["name"] == "Alice" and len(record["segment_ids"]) == 3
+    assert record["name"] == "Alice" and len(record["turns"]) == 3
     assert "Alice" in client.get("/").text  # applied immediately, before any reprocess
 
-    group_people(db_path, labels_dir)  # what reprocess runs
+    reprocess_people(db_path, labels_dir)
     db = sqlite3.connect(db_path)
-    people = dict(db.execute("SELECT segment_id, person FROM segment_people"))
+    people = dict(db.execute("SELECT turn_id, person FROM turn_people"))
     db.close()
     assert {people[s] for s in ["a0", "a2", "a4", "a6"]} == {"Alice"}
     assert {people[s] for s in ["b1", "b3", "b5", "b7"]} == {None}
 
 
-def test_segment_audio_supports_byte_ranges_for_ios(portal):
+def test_turn_audio_supports_byte_ranges_for_ios(portal):
     client, _, _ = portal
     log_in(client)
-    full = client.get("/audio/a2")  # segment [10, 14) s
+    full = client.get("/audio/a2")  # turn [10, 14) s
     assert full.status_code == 200 and full.headers["accept-ranges"] == "bytes"
     with wave.open(io.BytesIO(full.content)) as w:
         assert w.getnframes() == 4 * 16000
@@ -114,7 +122,7 @@ def test_skipped_clusters_go_to_the_back_of_the_queue(portal):
     client, db_path, labels_dir = portal
     log_in(client)
     db = sqlite3.connect(db_path)
-    cluster = dict(db.execute("SELECT segment_id, cluster FROM segment_people"))
+    cluster = dict(db.execute("SELECT turn_id, cluster FROM turn_people"))
     db.close()
     first, second = cluster["a0"], cluster["b1"]
 

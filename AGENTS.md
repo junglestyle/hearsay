@@ -33,26 +33,27 @@ Downstream consumers read this. They never receive audio.
 
 ## Current slice
 
-Slice 5: anonymous speakers and tagging. `hearsay/people.py` clusters
-not-owner segment embeddings (average linkage, cosine threshold) as the last
-step of reprocess, and applies the operator's names.
+Slice 6: local transcription. The dev box (GPU) transcribes and diarizes each
+conversation WAV with WhisperX (`hearsay/transcribe.py`, hourly systemd user
+timer set up by `install/gpu.sh`) and writes transcripts to the NAS. Reprocess
+turns them into speaker turns (`hearsay/turns.py`), and speaker labeling,
+clustering, the portal and the label tool all work on turns, not Omi segments.
 
-- Clusters are derived and unstable across reprocesses; names are durable
-  input stored on specific segment ids (labels/tags.jsonl), never on cluster
-  ids. A cluster takes its tagged segments' name, so naming is retroactive;
-  the same name on two clusters merges them into one person. Conflicting
-  names leave a cluster unnamed and flagged.
-- `hearsay/portal.py` is the web portal for naming clusters, built for the
-  phone. It binds to the LAN and tailnet addresses only, never all
-  interfaces, and never goes through the Cloudflare tunnel. Login is an HTML
-  form (for password managers) with an HMAC-signed session cookie.
-- "Mixed" answers and people spread over clusters (shown by
-  `python -m hearsay.label report`) tune CLUSTER_THRESHOLD.
-- Retention is not part of this slice. All audio is kept until tagging is
-  reliable (roadmap slice 10).
+- A transcript records the sha256 of the WAV it came from and its settings;
+  reprocess uses it only for that exact WAV, so turns always line up with the
+  audio. Conversations without one are pending, with no Omi fallback.
+- Operator input (ear labels, names, mixed, skip) is matched to turns by time
+  span, never by id, so it survives re-transcription. Old records name Omi
+  segment ids and are placed via those segments' times; new records carry
+  their spans.
+- Omi's segments stay in the database as facts, but only conversation
+  windows (memory payloads) still come from Omi, until slice 7.
+- Speaker thresholds were tuned on Omi segments; re-check them on turns with
+  `python -m hearsay.label report`.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when tagging a speaker once relabels their past conversations.
+Done when every conversation's utterances come from our own transcription,
+and past labels and names still apply.
 
 ## Engineering style
 

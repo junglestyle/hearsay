@@ -1,13 +1,12 @@
-"""Group not-owner segments into anonymous speakers, and apply the operator's names.
+"""Group not-owner turns into anonymous speakers, and apply the operator's names.
 
 Clusters are derived and recomputed on every reprocess, so their ids are not
 stable. Names are not stored on clusters: they are the operator's durable
-input, recorded on specific segments (labels/tags.jsonl). A cluster takes the
-name of its tagged segments, which makes naming retroactive, and giving two
-clusters the same name merges them into one person.
+input (labels/tags.jsonl), matched to turns by time (hearsay/turns.py). A
+cluster takes the name of its tagged turns, which makes naming retroactive,
+and giving two clusters the same name merges them into one person.
 """
 
-import json
 import sqlite3
 from array import array
 from pathlib import Path
@@ -20,39 +19,20 @@ from pathlib import Path
 CLUSTER_THRESHOLD = 0.40
 
 SCHEMA = """
-DROP TABLE IF EXISTS segment_people;
--- One row per segment labeled not_owner.
-CREATE TABLE segment_people (
-    payload_path TEXT NOT NULL,
-    idx INTEGER NOT NULL,
-    segment_id TEXT NOT NULL,
-    cluster TEXT NOT NULL,           -- smallest segment_id in the cluster; changes as data grows
+DROP TABLE IF EXISTS turn_people;
+-- One row per turn labeled not_owner.
+CREATE TABLE turn_people (
+    turn_id TEXT PRIMARY KEY REFERENCES turns(turn_id),
+    cluster TEXT NOT NULL,           -- smallest turn_id in the cluster; changes as data grows
     person TEXT,                     -- operator's name for the cluster, NULL if unnamed or conflicting
-    name_conflict INTEGER NOT NULL,  -- 1 if the cluster's tagged segments carry different names
-    PRIMARY KEY (payload_path, idx)
+    name_conflict INTEGER NOT NULL   -- 1 if the cluster's tagged turns carry different names
 );
 """
 
 
-def parse_tags(text: str) -> tuple[dict[str, str], set[str], set[str]]:
-    """Names by segment_id (latest wins), and the segments heard in clusters
-    marked mixed (several people) or skipped (decide later)."""
-    names, mixed, skipped = {}, set(), set()
-    for line in text.splitlines():
-        record = json.loads(line)
-        if record["type"] == "name":
-            for segment_id in record["segment_ids"]:
-                names[segment_id] = record["name"]
-        elif record["type"] == "mixed":
-            mixed.update(record["segment_ids"])
-        elif record["type"] == "skip":
-            skipped.update(record["segment_ids"])
-    return names, mixed, skipped
-
-
-def cluster_name(segment_ids, names: dict[str, str]) -> tuple[str | None, bool]:
-    """A cluster's person, and whether its tagged segments disagree."""
-    tagged = {names[s] for s in segment_ids if s in names}
+def cluster_name(turn_ids, names: dict[str, str]) -> tuple[str | None, bool]:
+    """A cluster's person, and whether its tagged turns disagree."""
+    tagged = {names[t] for t in turn_ids if t in names}
     return (next(iter(tagged)) if len(tagged) == 1 else None), len(tagged) > 1
 
 
@@ -67,38 +47,34 @@ def cluster(vectors) -> list[int]:
     return list(fcluster(tree, t=1 - CLUSTER_THRESHOLD, criterion="distance"))
 
 
-def group_people(db_path: Path, labels_dir: Path) -> dict:
-    tags_path = labels_dir / "tags.jsonl"
-    names, _, _ = parse_tags(tags_path.read_text() if tags_path.exists() else "")
+def group_people(db_path: Path) -> dict:
     db = sqlite3.connect(db_path)
     try:
+        names = dict(db.execute("SELECT turn_id, value FROM operator_input WHERE kind = 'name'"))
         rows = db.execute(
-            "SELECT payload_path, idx, segment_id, embedding FROM segment_speakers"
-            " WHERE label = 'not_owner' ORDER BY segment_id, payload_path, idx"
+            "SELECT turn_id, embedding FROM turn_speakers WHERE label = 'not_owner' ORDER BY turn_id"
         ).fetchall()
-        assignments = cluster([list(array("f", r[3])) for r in rows])
+        assignments = cluster([list(array("f", embedding)) for _, embedding in rows])
 
         members = {}
-        for row, c in zip(rows, assignments):
-            members.setdefault(c, []).append(row)
+        for (turn_id, _), c in zip(rows, assignments):
+            members.setdefault(c, []).append(turn_id)
 
         out = []
-        for group in members.values():
-            cluster_id = min(r[2] for r in group)
-            person, conflict = cluster_name([r[2] for r in group], names)
-            out += [(r[0], r[1], r[2], cluster_id, person, int(conflict)) for r in group]
+        for turn_ids in members.values():
+            person, conflict = cluster_name(turn_ids, names)
+            out += [(t, min(turn_ids), person, int(conflict)) for t in turn_ids]
 
         db.executescript(SCHEMA)
-        db.executemany("INSERT INTO segment_people VALUES (?,?,?,?,?,?)", sorted(out))
+        db.executemany("INSERT INTO turn_people VALUES (?,?,?,?)", sorted(out))
         db.commit()
     finally:
         db.close()
 
-    clusters = {r[3] for r in out}
     return {
-        "segments": len(out),
-        "clusters": len(clusters),
-        "named_clusters": len({r[3] for r in out if r[4]}),
-        "people": len({r[4] for r in out if r[4]}),
-        "conflicts": len({r[3] for r in out if r[5]}),
+        "turns": len(out),
+        "clusters": len({r[1] for r in out}),
+        "named_clusters": len({r[1] for r in out if r[2]}),
+        "people": len({r[2] for r in out if r[2]}),
+        "conflicts": len({r[1] for r in out if r[3]}),
     }

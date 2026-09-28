@@ -15,6 +15,7 @@ Timing rules below were measured on real captures:
   over the conversation's segments, then shifted by a measured offset.
 """
 
+import hashlib
 import sqlite3
 import wave
 from datetime import datetime, timezone
@@ -43,7 +44,8 @@ CREATE TABLE conversation_audio (
     zero_source TEXT NOT NULL,       -- live (transcript arrival) | started_at
     duration REAL NOT NULL,          -- seconds, up to the last segment's end
     coverage REAL NOT NULL,          -- fraction of duration with received audio
-    wav_file TEXT                    -- relative to the audio dir; NULL if no audio
+    wav_file TEXT,                   -- relative to the audio dir; NULL if no audio
+    wav_sha256 TEXT                  -- transcripts are only used for this exact WAV
 );
 """
 
@@ -148,15 +150,16 @@ def assemble(raw_dir: Path, db_path: Path, audio_dir: Path) -> dict:
                 continue
             zero, source = zero_point(db, memory_path, started_at)
             pcm, coverage = cut(raw_dir, bursts, zero, duration)
-            wav_file = None
+            wav_file = wav_sha256 = None
             if coverage > 0:
                 wav_file = f"{conversation_id}.wav"
                 write_wav(audio_dir / wav_file, pcm)
+                wav_sha256 = hashlib.sha256((audio_dir / wav_file).read_bytes()).hexdigest()
             zero_at = datetime.fromtimestamp(zero, timezone.utc).isoformat()
-            rows.append((conversation_id, memory_path, zero_at, source, duration, coverage, wav_file))
+            rows.append((conversation_id, memory_path, zero_at, source, duration, coverage, wav_file, wav_sha256))
 
         db.executescript(SCHEMA)
-        db.executemany("INSERT INTO conversation_audio VALUES (?,?,?,?,?,?,?)", rows)
+        db.executemany("INSERT INTO conversation_audio VALUES (?,?,?,?,?,?,?,?)", rows)
         db.commit()
     finally:
         db.close()

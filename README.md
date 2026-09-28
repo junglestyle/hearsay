@@ -25,8 +25,15 @@ Secrets are kept in env files outside the repo.
 3. **NAS, as root:** [`install/tunnel.sh`](install/tunnel.sh) connects a Cloudflare Tunnel,
    shows you the webhook URLs to enter in the Omi app, and waits until real
    payloads of every type arrive.
+4. **NAS, as root:** reprocess once (below), so there are conversation WAVs to
+   transcribe.
+5. **Dev box with the GPU, as your user:** [`install/gpu.sh`](install/gpu.sh)
+   sets up transcription (WhisperX) and an hourly timer that pulls new WAVs
+   from the NAS over `ssh nas` and writes transcripts back. It asks for a
+   Hugging Face token for the gated diarization model. Then reprocess again.
 
-To update, run `git pull`, then re-run `install/nas.sh`.
+To update, run `git pull` on both hosts, then re-run `install/nas.sh` on the
+NAS and `install/gpu.sh` on the dev box.
 
 ## Data
 
@@ -41,7 +48,11 @@ header in the sidecars records where each request came from.
 
 ## Reprocessing
 
-Rebuild everything derived from raw, on the NAS as root:
+Rebuild everything derived from raw, on the NAS as root. Transcripts come from
+the dev box, so new audio takes two passes: a reprocess makes the WAVs, the
+dev box's hourly timer transcribes them (or run
+`systemctl --user start hearsay-transcribe` there), and the next reprocess
+turns the transcripts into turns.
 
 ```sh
 docker compose -f /mnt/storage/hearsay/repo/install/compose.yaml run --rm reprocess

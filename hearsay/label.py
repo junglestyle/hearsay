@@ -1,4 +1,4 @@
-"""Label segments by ear, and report how well the thresholds match the labels.
+"""Label turns by ear, and report how well the thresholds match the labels.
 
 Naming other speakers happens in the web portal (hearsay/portal.py).
 
@@ -7,7 +7,7 @@ the NAS over `ssh nas`. Labels are the operator's durable input: they are
 appended to the labels dir on the NAS and never rebuilt or overwritten.
 
     python -m hearsay.label enroll START END   # add an enrollment window
-    python -m hearsay.label                    # label segments me / not me, blind
+    python -m hearsay.label                    # label turns me / not me, blind
     python -m hearsay.label report             # precision/recall, cluster health
 
 START and END are ISO-8601 times, e.g. 2026-09-27T10:05; without a UTC
@@ -21,7 +21,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 
-from hearsay.people import CLUSTER_THRESHOLD, parse_tags
+from hearsay.people import CLUSTER_THRESHOLD
 from hearsay.speakers import NOT_OWNER_THRESHOLD, OWNER_THRESHOLD
 
 NAS = "nas"
@@ -29,23 +29,26 @@ DB = "/mnt/storage/hearsay/db/hearsay.sqlite"
 AUDIO_DIR = "/mnt/storage/hearsay/audio"
 LABELS = "/mnt/storage/hearsay/labels/labels.jsonl"
 ENROLLMENT = "/mnt/storage/hearsay/labels/enrollment.json"
-TAGS = "/mnt/storage/hearsay/labels/tags.jsonl"
 ANSWERS = {"m": "owner", "n": "not_owner", "u": "unsure"}
 
 CANDIDATES_SQL = """
-SELECT ss.segment_id, ss.owner_similarity, s.start, s.end, ca.wav_file
-FROM segment_speakers ss
-JOIN segments s ON s.payload_path = ss.payload_path AND s.idx = ss.idx
-JOIN conversation_audio ca ON ca.conversation_id = ss.conversation_id
-WHERE ss.embedding IS NOT NULL
+SELECT t.turn_id, t.conversation_id, t.start, t.end, ts.owner_similarity, ca.wav_file
+FROM turn_speakers ts
+JOIN turns t ON t.turn_id = ts.turn_id
+JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id
+WHERE ts.embedding IS NOT NULL
 """
+
+# The operator's labels and tags as reprocess matched them to turns.
+LABELS_SQL = "SELECT turn_id, value FROM operator_input WHERE kind = 'label'"
+REVIEWED_SQL = "SELECT turn_id, kind FROM operator_input WHERE kind IN ('name', 'mixed')"
 
 CLUSTERS_SQL = """
-SELECT sp.segment_id, sp.cluster, sp.person, sp.name_conflict
-FROM segment_people sp
+SELECT turn_id, cluster, person, name_conflict
+FROM turn_people
 """
 
-# Runs on the NAS: writes one segment of a conversation WAV to stdout as WAV.
+# Runs on the NAS: writes one turn of a conversation WAV to stdout as WAV.
 SLICE_SCRIPT = """
 import sys, wave
 path, start, end = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
@@ -73,29 +76,20 @@ def candidates() -> list[dict]:
 
 
 def clusters() -> dict[str, list[dict]]:
-    """cluster -> its segments, largest cluster first."""
+    """cluster -> its turns, largest cluster first."""
     grouped = {}
     for row in query(CLUSTERS_SQL):
         grouped.setdefault(row["cluster"], []).append(row)
     return dict(sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])))
 
 
-def existing_tags() -> tuple[dict[str, str], set[str], set[str]]:
-    return parse_tags(ssh(["sh", "-c", f"'cat {TAGS} 2>/dev/null || true'"]).decode())
-
-
 def existing_labels() -> dict[str, str]:
-    """segment_id -> label; the latest answer wins."""
-    out = ssh(["sh", "-c", f"'cat {LABELS} 2>/dev/null || true'"])
-    labels = {}
-    for line in out.decode().splitlines():
-        record = json.loads(line)
-        labels[record["segment_id"]] = record["label"]
-    return labels
+    """turn_id -> label, as of the last reprocess."""
+    return {row["turn_id"]: row["value"] for row in query(LABELS_SQL)}
 
 
-def play(segment: dict) -> None:
-    wav = ssh(["python3", "-", f"{AUDIO_DIR}/{segment['wav_file']}", str(segment["start"]), str(segment["end"])],
+def play(turn: dict) -> None:
+    wav = ssh(["python3", "-", f"{AUDIO_DIR}/{turn['wav_file']}", str(turn["start"]), str(turn["end"])],
               SLICE_SCRIPT.encode())
     with tempfile.NamedTemporaryFile(suffix=".wav") as f:
         f.write(wav)
@@ -117,27 +111,28 @@ def pick(unlabeled: list[dict]) -> dict:
 
 def label_loop() -> None:
     labeled = existing_labels()
-    unlabeled = [s for s in candidates() if s["segment_id"] not in labeled]
+    unlabeled = [s for s in candidates() if s["turn_id"] not in labeled]
     print(f"{len(labeled)} labeled, {len(unlabeled)} to go.")
     print("m = me, n = not me, u = unsure, r = replay, q = quit")
     while unlabeled:
-        segment = pick(unlabeled)
-        print(f"\n{segment['end'] - segment['start']:.1f} s")
-        play(segment)
+        turn = pick(unlabeled)
+        print(f"\n{turn['end'] - turn['start']:.1f} s")
+        play(turn)
         answer = ""
         while answer not in ANSWERS:
             answer = input("> ").strip().lower()
             if answer == "q":
                 return
             if answer == "r":
-                play(segment)
+                play(turn)
+        # The span, not just the id, so the label survives re-transcription.
         record = {
-            "segment_id": segment["segment_id"],
+            "turns": [{k: turn[k] for k in ("turn_id", "conversation_id", "start", "end")}],
             "label": ANSWERS[answer],
             "labeled_at": datetime.now(timezone.utc).isoformat(),
         }
         ssh(["sh", "-c", f"'cat >> {LABELS}'"], (json.dumps(record) + "\n").encode())
-        unlabeled.remove(segment)
+        unlabeled.remove(turn)
 
 
 def enroll(start: str, end: str) -> None:
@@ -167,11 +162,11 @@ def report() -> None:
     print("enrollment (start | end | coverage | 3 s pieces used):")
     print(enrolled.decode() or "  none; run `python -m hearsay.label enroll` and reprocess\n")
     labeled = existing_labels()
-    rows = [(s["owner_similarity"], labeled[s["segment_id"]]) for s in candidates()
-            if s["segment_id"] in labeled and s["owner_similarity"] is not None]
+    rows = [(s["owner_similarity"], labeled[s["turn_id"]]) for s in candidates()
+            if s["turn_id"] in labeled and s["owner_similarity"] is not None]
     rows = [(sim, label) for sim, label in rows if label != "unsure"]
     owners = sum(1 for _, label in rows if label == "owner")
-    print(f"{len(rows)} labeled segments with scores ({owners} owner, {len(rows) - owners} not owner)")
+    print(f"{len(rows)} labeled turns with scores ({owners} owner, {len(rows) - owners} not owner)")
     print(f"thresholds in this checkout: owner >= {OWNER_THRESHOLD}, not_owner <= {NOT_OWNER_THRESHOLD}\n")
     print("owner if similarity >= t        not_owner if similarity <= t")
     print("   t  labeled  precision recall     t  labeled  precision recall")
@@ -188,14 +183,16 @@ def cluster_report() -> None:
     except subprocess.CalledProcessError:
         print("\nno clusters yet (reprocess with this code first)")
         return
-    names, marked_mixed, _ = existing_tags()
+    reviewed_rows = query(REVIEWED_SQL)
+    named = {r["turn_id"] for r in reviewed_rows if r["kind"] == "name"}
+    marked_mixed = {r["turn_id"] for r in reviewed_rows if r["kind"] == "mixed"}
     people = {}
     for c, segs in grouped.items():
         if segs[0]["person"]:
             people.setdefault(segs[0]["person"], []).append(c)
     reviewed = [segs for segs in grouped.values()
-                if any(s["segment_id"] in names or s["segment_id"] in marked_mixed for s in segs)]
-    mixed_now = [segs for segs in reviewed if marked_mixed & {s["segment_id"] for s in segs}]
+                if any(s["turn_id"] in named or s["turn_id"] in marked_mixed for s in segs)]
+    mixed_now = [segs for segs in reviewed if marked_mixed & {s["turn_id"] for s in segs}]
     sizes = sorted((len(s) for s in grouped.values()), reverse=True)
     print(f"\nanonymous speakers (cluster threshold in this checkout: {CLUSTER_THRESHOLD})")
     print(f"  {len(grouped)} clusters, sizes {sizes[:12]}{' ...' if len(sizes) > 12 else ''}")

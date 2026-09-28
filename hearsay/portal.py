@@ -5,8 +5,10 @@ through the Cloudflare tunnel. Login is a plain HTML form, not an HTTP auth
 dialog, so password managers can fill it; sessions are HMAC-signed cookies.
 
 Names are written to labels/tags.jsonl, the same durable input reprocess
-reads. The portal applies them to the current clusters as soon as they are
-saved, using the same rule as reprocess (hearsay.people.cluster_name).
+reads, with the time spans of the turns heard so they survive
+re-transcription. The portal applies them to the current clusters as soon as
+they are saved, using the same rules as reprocess (hearsay.turns.resolve and
+hearsay.people.cluster_name).
 """
 
 import asyncio
@@ -26,22 +28,22 @@ from urllib.parse import parse_qs, quote
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from hearsay.people import cluster_name, parse_tags
+from hearsay.people import cluster_name
+from hearsay.turns import read_operator_files, resolve
 
 COOKIE = "hearsay_session"
 SESSION_SECONDS = 30 * 24 * 3600
 # Samples played per cluster.
 SAMPLES = 3
-# Smaller clusters (mostly single noisy segments) aren't offered for naming.
+# Smaller clusters (mostly single noisy turns) aren't offered for naming.
 MIN_TAG_CLUSTER = 3
 
 CLUSTERS_SQL = """
-SELECT sp.segment_id, sp.cluster, ss.conversation_id, s.start, s.end, ca.wav_file
-FROM segment_people sp
-JOIN segment_speakers ss ON ss.payload_path = sp.payload_path AND ss.idx = sp.idx
-JOIN segments s ON s.payload_path = sp.payload_path AND s.idx = sp.idx
-JOIN conversation_audio ca ON ca.conversation_id = ss.conversation_id
-ORDER BY sp.cluster, sp.segment_id
+SELECT tp.turn_id, tp.cluster, t.conversation_id, t.start, t.end, ca.wav_file
+FROM turn_people tp
+JOIN turns t ON t.turn_id = tp.turn_id
+JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id
+ORDER BY tp.cluster, tp.turn_id
 """
 
 STYLE = """
@@ -104,9 +106,9 @@ def ranged(data: bytes, range_header: str | None) -> Response:
     return Response(data[start : end + 1], status_code=206, media_type="audio/wav", headers=headers)
 
 
-def samples(segments: list[dict]) -> list[dict]:
-    """The longest segments, one per conversation first, so samples cover the cluster's spread."""
-    by_length = sorted(segments, key=lambda s: (-(s["end"] - s["start"]), s["segment_id"]))
+def samples(turns: list[dict]) -> list[dict]:
+    """The longest turns, one per conversation first, so samples cover the cluster's spread."""
+    by_length = sorted(turns, key=lambda s: (-(s["end"] - s["start"]), s["turn_id"]))
     picked, conversations = [], set()
     for s in by_length:
         if s["conversation_id"] not in conversations:
@@ -129,11 +131,19 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             return False
         return hmac.compare_digest(signature, sign(int(expires)))
 
-    def read_tags():
-        return parse_tags(tags_path.read_text() if tags_path.exists() else "")
+    def connect() -> sqlite3.Connection:
+        return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+
+    def read_tags() -> tuple[dict[str, str], set[str], set[str]]:
+        db = connect()
+        try:
+            found = resolve(db, *read_operator_files(labels_dir))
+        finally:
+            db.close()
+        return found.names, found.mixed, found.skipped
 
     def load_clusters() -> dict[str, list[dict]]:
-        db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        db = connect()
         db.row_factory = sqlite3.Row
         try:
             rows = [dict(r) for r in db.execute(CLUSTERS_SQL)]
@@ -148,7 +158,7 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         """Clusters still to name, largest first: (not skipped, skipped)."""
         todo, later = [], []
         for c, segs in grouped.items():
-            ids = {s["segment_id"] for s in segs}
+            ids = {s["turn_id"] for s in segs}
             if len(segs) < MIN_TAG_CLUSTER or mixed & ids or cluster_name(ids, names)[0]:
                 continue
             (later if skipped & ids else todo).append(c)
@@ -209,20 +219,20 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         people = {}
         conflicts = 0
         for c, segs in grouped.items():
-            person, conflict = cluster_name([s["segment_id"] for s in segs], names)
+            person, conflict = cluster_name([s["turn_id"] for s in segs], names)
             conflicts += conflict
             if person:
                 people.setdefault(person, []).append((c, len(segs)))
         def items(clusters):
             return "".join(
-                f"<li><a href='/cluster/{quote(c)}'>{len(grouped[c])} segments"
+                f"<li><a href='/cluster/{quote(c)}'>{len(grouped[c])} turns"
                 f" <span class='muted'>· {len({s['conversation_id'] for s in grouped[c]})} conversation(s)</span></a></li>"
                 for c in clusters
             )
 
         people_items = "".join(
             f"<li><a href='/cluster/{quote(clusters[0][0])}'>{html.escape(p)}</a>"
-            f" <span class='muted'>{sum(n for _, n in clusters)} segments in {len(clusters)} cluster(s)</span></li>"
+            f" <span class='muted'>{sum(n for _, n in clusters)} turns in {len(clusters)} cluster(s)</span></li>"
             for p, clusters in sorted(people.items())
         )
         return page("Hearsay speakers", f"""
@@ -241,8 +251,8 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         if cluster_id not in grouped:
             return RedirectResponse("/", status_code=303)
         names, _, _ = read_tags()
-        segments = grouped[cluster_id]
-        person, conflict = cluster_name([s["segment_id"] for s in segments], names)
+        turns = grouped[cluster_id]
+        person, conflict = cluster_name([s["turn_id"] for s in turns], names)
         if person:
             status = f"Named <strong>{html.escape(person)}</strong>. Saving a new name renames this cluster."
         elif conflict:
@@ -250,15 +260,15 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         else:
             status = "Unnamed."
         players = "".join(
-            f"<audio controls preload='none' src='/audio/{quote(s['segment_id'])}'></audio>"
+            f"<audio controls preload='none' src='/audio/{quote(s['turn_id'])}'></audio>"
             f"<div class='muted'>{s['end'] - s['start']:.1f} s</div>"
-            for s in samples(segments)
+            for s in samples(turns)
         )
         known = "".join(f"<option value='{html.escape(n)}'>" for n in sorted(set(names.values())))
         return page("Hearsay cluster", f"""
 <p><a href="/">← Speakers</a></p>
-<h1>{len(segments)} segments</h1>
-<p class="muted">{len({s['conversation_id'] for s in segments})} conversation(s). {status}</p>
+<h1>{len(turns)} turns</h1>
+<p class="muted">{len({s['conversation_id'] for s in turns})} conversation(s). {status}</p>
 {players}
 <form method="post" action="/cluster/{quote(cluster_id)}">
   <label for="name">Who is this? Reusing a name merges into that person.</label>
@@ -280,17 +290,21 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         action = form.get("action", [""])[0]
         name = " ".join(form.get("name", [""])[0].split())
         names, _, _ = read_tags()
-        segments = grouped[cluster_id]
-        heard = [s["segment_id"] for s in samples(segments)]
+        turns = grouped[cluster_id]
+        heard = samples(turns)
+
+        def spans(chosen):
+            return [{k: s[k] for k in ("turn_id", "conversation_id", "start", "end")} for s in chosen]
+
         if action == "mixed":
-            append_tag({"type": "mixed", "segment_ids": heard})
+            append_tag({"type": "mixed", "turns": spans(heard)})
         elif action == "skip":
-            append_tag({"type": "skip", "segment_ids": heard})
+            append_tag({"type": "skip", "turns": spans(heard)})
         elif action == "name" and name:
-            # Also retag this cluster's already-tagged segments, so a new name
+            # Also retag this cluster's already-tagged turns, so a new name
             # renames the cluster or settles a conflict.
-            ids = heard + [s["segment_id"] for s in segments if s["segment_id"] in names and s["segment_id"] not in heard]
-            append_tag({"type": "name", "segment_ids": ids, "name": name})
+            chosen = heard + [s for s in turns if s["turn_id"] in names and s not in heard]
+            append_tag({"type": "name", "turns": spans(chosen), "name": name})
         else:
             return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)
         # Next: the first unskipped cluster; skipped ones only come round again
@@ -299,19 +313,17 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         following = [c for c in todo + later if c != cluster_id]
         return RedirectResponse(f"/cluster/{quote(following[0])}" if following else "/", status_code=303)
 
-    @app.get("/audio/{segment_id}")
-    async def audio(request: Request, segment_id: str) -> Response:
+    @app.get("/audio/{turn_id}")
+    async def audio(request: Request, turn_id: str) -> Response:
         if not logged_in(request):
             return Response(status_code=401)
-        db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        db = connect()
         try:
             row = db.execute(
-                "SELECT ca.wav_file, s.start, s.end FROM segment_people sp"
-                " JOIN segment_speakers ss ON ss.payload_path = sp.payload_path AND ss.idx = sp.idx"
-                " JOIN segments s ON s.payload_path = sp.payload_path AND s.idx = sp.idx"
-                " JOIN conversation_audio ca ON ca.conversation_id = ss.conversation_id"
-                " WHERE sp.segment_id = ?",
-                (segment_id,),
+                "SELECT ca.wav_file, t.start, t.end FROM turns t"
+                " JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id"
+                " WHERE t.turn_id = ?",
+                (turn_id,),
             ).fetchone()
         finally:
             db.close()

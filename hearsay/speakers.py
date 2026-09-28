@@ -1,10 +1,11 @@
-"""Speaker embeddings per segment, and owner / not-owner labels.
+"""Speaker embeddings per turn, and owner / not-owner labels.
 
-Reads the database (after assemble), the raw audio stream, and the operator's
-durable inputs in the labels dir. Segment audio is cut from the stream with
-the conversation's zero point, so segment coverage is exact.
+Reads the database (after turns are built), the raw audio stream, and the
+operator's enrollment windows in the labels dir. Turn audio is cut from the
+stream at the conversation's zero point, which is where its WAV starts, so
+turn coverage is exact.
 
-Tuned for precision: a segment is labeled only when its similarity to the
+Tuned for precision: a turn is labeled only when its similarity to the
 owner's enrolled voice is clearly high or clearly low. Everything in between,
 and anything too short or missing audio, stays unlabeled.
 """
@@ -16,14 +17,15 @@ from pathlib import Path
 
 from hearsay.assemble import cut, place_bursts, timestamp
 
-# Thresholds tuned on 2026-09-27 against 176 ear-labeled real segments
+# Thresholds tuned on 2026-09-27 against 176 ear-labeled Omi segments
 # (`python -m hearsay.label report`). Nearly all misses were under 2.5 s, and
-# the cutoff keeps 87% of speech time. At these values, labeled segments of
+# the cutoff kept 87% of speech time. At these values, labeled segments of
 # at least 2.5 s scored precision 1.00 on both sides (owner recall 0.93 over
 # 64 predictions, not-owner recall 0.90 over 26). Owner sits above 0.30, the
-# lowest value tested, for margin.
-MIN_SEGMENT = 2.5
-# Fraction of a segment that must be received audio, not filled silence.
+# lowest value tested, for margin. Re-check them on WhisperX turns, whose
+# boundaries differ from Omi's.
+MIN_TURN = 2.5
+# Fraction of a turn that must be received audio, not filled silence.
 MIN_COVERAGE = 0.8
 # Enrollment audio is embedded in pieces this long, then averaged.
 ENROLLMENT_PIECE = 3.0
@@ -32,20 +34,16 @@ OWNER_THRESHOLD = 0.40
 NOT_OWNER_THRESHOLD = 0.14
 
 SCHEMA = """
-DROP TABLE IF EXISTS segment_speakers;
+DROP TABLE IF EXISTS turn_speakers;
 DROP TABLE IF EXISTS owner_enrollment;
--- One row per segment of each conversation's latest memory payload.
-CREATE TABLE segment_speakers (
-    payload_path TEXT NOT NULL,
-    idx INTEGER NOT NULL,
-    segment_id TEXT NOT NULL,
+-- One row per turn.
+CREATE TABLE turn_speakers (
+    turn_id TEXT PRIMARY KEY REFERENCES turns(turn_id),
     conversation_id TEXT NOT NULL,
-    coverage REAL NOT NULL,          -- fraction of the segment with received audio
+    coverage REAL NOT NULL,          -- fraction of the turn with received audio
     embedding BLOB,                  -- float32 x 192, NULL if too short or too little audio
     owner_similarity REAL,           -- cosine similarity to the enrolled owner voice
-    label TEXT,                      -- owner | not_owner | NULL (ambiguous or unknown)
-    PRIMARY KEY (payload_path, idx),
-    FOREIGN KEY (payload_path, idx) REFERENCES segments(payload_path, idx)
+    label TEXT                       -- owner | not_owner | NULL (ambiguous or unknown)
 );
 CREATE TABLE owner_enrollment (
     start TEXT NOT NULL,
@@ -122,17 +120,17 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
         bursts = place_bursts(db)
         owner = owner_voice(model, raw_dir, bursts, labels_dir, db)
 
-        segments = db.execute(
-            "SELECT s.payload_path, s.idx, s.segment_id, ca.conversation_id, ca.zero_at, s.start, s.end"
-            " FROM conversation_audio ca JOIN segments s ON s.payload_path = ca.memory_path"
-            " ORDER BY ca.zero_at, s.idx"
+        turns = db.execute(
+            "SELECT t.turn_id, t.conversation_id, ca.zero_at, t.start, t.end"
+            " FROM turns t JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id"
+            " ORDER BY ca.zero_at, t.idx"
         ).fetchall()
-        counts = {"segments": len(segments), "embedded": 0, "owner": 0, "not_owner": 0}
-        for payload_path, idx, segment_id, conversation_id, zero_at, start, end in segments:
+        counts = {"turns": len(turns), "embedded": 0, "owner": 0, "not_owner": 0}
+        for turn_id, conversation_id, zero_at, start, end in turns:
             duration = max(0.0, end - start)
             pcm, coverage = cut(raw_dir, bursts, timestamp(zero_at) + start, duration) if duration else (b"", 0.0)
             embedding = similarity = label = None
-            if duration >= MIN_SEGMENT and coverage >= MIN_COVERAGE:
+            if duration >= MIN_TURN and coverage >= MIN_COVERAGE:
                 vector = embed(model, pcm)
                 embedding = array("f", vector).tobytes()
                 counts["embedded"] += 1
@@ -142,8 +140,8 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
                     if label:
                         counts[label] += 1
             db.execute(
-                "INSERT INTO segment_speakers VALUES (?,?,?,?,?,?,?,?)",
-                (payload_path, idx, segment_id, conversation_id, coverage, embedding, similarity, label),
+                "INSERT INTO turn_speakers VALUES (?,?,?,?,?,?)",
+                (turn_id, conversation_id, coverage, embedding, similarity, label),
             )
         db.commit()
     finally:

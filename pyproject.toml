@@ -15,6 +15,13 @@ speakers = [
     "torch==2.14.0",
     "torchaudio==2.11.0",
 ]
+# The dev box GPU worker only (install/gpu.sh). Python 3.12: WhisperX's
+# dependencies don't support newer Pythons yet.
+transcribe = [
+    "whisperx==3.8.6",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
+]
 dev = [
     "pytest",
     "httpx2",

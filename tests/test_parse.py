@@ -10,6 +10,7 @@ from hearsay.parse import ParseFailed, rebuild
 from hearsay.people import group_people
 from hearsay.receiver import create_app
 from hearsay.speakers import label_speakers
+from hearsay.turns import build_turns, record_operator_input
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -113,7 +114,11 @@ def test_every_real_captured_payload_reprocesses(tmp_path):
     raw, db_path = Path(REAL_RAW_DIR), tmp_path / "check.sqlite"
     (tmp_path / "audio").mkdir()
     (tmp_path / "labels").mkdir()
+    # Real transcripts, when mounted; they only apply if WAVs rebuild byte-identical.
+    transcripts = Path(os.environ.get("HEARSAY_CHECK_TRANSCRIPTS_DIR", tmp_path / "no-transcripts"))
     rebuild(raw, db_path)
     assemble(raw, db_path, tmp_path / "audio")
+    build_turns(db_path, transcripts)
+    record_operator_input(db_path, tmp_path / "labels")
     label_speakers(raw, db_path, tmp_path / "labels", Path(os.environ["HEARSAY_MODEL_DIR"]))
-    group_people(db_path, tmp_path / "labels")
+    group_people(db_path)

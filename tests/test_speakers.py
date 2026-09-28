@@ -9,6 +9,7 @@ import pytest
 
 from hearsay.assemble import assemble
 from hearsay.parse import rebuild
+from hearsay.turns import build_turns
 from test_assemble import T, memory, segment, seconds, write_payload
 
 pytest.importorskip("speechbrain")
@@ -52,9 +53,9 @@ def stream(raw, pcm, start_s):
 
 def test_segments_of_the_enrolled_voice_score_higher(tmp_path):
     raw, db_path = tmp_path / "raw", tmp_path / "h.sqlite"
-    audio_dir, labels_dir = tmp_path / "audio", tmp_path / "labels"
-    audio_dir.mkdir()
-    labels_dir.mkdir()
+    audio_dir, labels_dir, transcripts_dir = tmp_path / "audio", tmp_path / "labels", tmp_path / "transcripts"
+    for d in (audio_dir, labels_dir, transcripts_dir):
+        d.mkdir()
     owner, other = (110, (700, 1200, 2500)), (230, (400, 2200, 3000))
 
     # [0, 30) s: the owner alone, for enrollment. [40, 60) s: a conversation
@@ -69,10 +70,25 @@ def test_segments_of_the_enrolled_voice_score_higher(tmp_path):
 
     rebuild(raw, db_path)
     assemble(raw, db_path, audio_dir)
+    # The transcript the dev box would make: one turn per 5 s voice sample
+    # (named by its word), plus a short turn from a third voice.
+    db = sqlite3.connect(db_path)
+    wav_sha256 = db.execute("SELECT wav_sha256 FROM conversation_audio WHERE conversation_id = 'c'").fetchone()[0]
+    db.close()
+    spans = [("s0", 0, 5, "A"), ("s1", 5, 10, "B"), ("s2", 10, 15, "A"), ("s3", 15, 19, "B"), ("short", 19.2, 19.7, "C")]
+    transcript_segments = [
+        {"start": s, "end": e, "text": w, "speaker": spk,
+         "words": [{"word": w, "start": s, "end": e, "score": 1.0, "speaker": spk}]}
+        for w, s, e, spk in spans
+    ]
+    (transcripts_dir / "c.json").write_text(json.dumps(
+        {"conversation_id": "c", "wav_sha256": wav_sha256, "settings": {}, "segments": transcript_segments}))
+    build_turns(db_path, transcripts_dir)
     counts = label_speakers(raw, db_path, labels_dir, MODEL_DIR)
 
     db = sqlite3.connect(db_path)
-    similarity = dict(db.execute("SELECT segment_id, owner_similarity FROM segment_speakers"))
+    similarity = dict(db.execute(
+        "SELECT t.text, ts.owner_similarity FROM turn_speakers ts JOIN turns t ON t.turn_id = ts.turn_id"))
     enrollment = db.execute("SELECT coverage, pieces FROM owner_enrollment").fetchall()
     db.close()
     assert enrollment == [(1.0, 10)]

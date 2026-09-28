@@ -1,4 +1,8 @@
-"""Rebuild everything derived from raw: database, conversation audio, speaker labels, people."""
+"""Rebuild everything derived from raw: database, conversation audio, turns, speaker labels, people.
+
+Turns come from transcripts the dev box makes of each WAV (hearsay/transcribe.py),
+so new audio needs a reprocess, a transcription run, then another reprocess.
+"""
 
 import os
 import sqlite3
@@ -10,6 +14,7 @@ from hearsay.parse import ParseFailed, rebuild
 from hearsay.people import group_people
 from hearsay import people, speakers
 from hearsay.speakers import label_speakers
+from hearsay.turns import build_turns, record_operator_input
 
 
 def main() -> None:
@@ -18,6 +23,7 @@ def main() -> None:
     audio_dir = Path(os.environ["HEARSAY_AUDIO_DIR"])
     labels_dir = Path(os.environ["HEARSAY_LABELS_DIR"])
     model_dir = Path(os.environ["HEARSAY_MODEL_DIR"])
+    transcripts_dir = Path(os.environ["HEARSAY_TRANSCRIPTS_DIR"])
     try:
         parsed = rebuild(raw_dir, db_path)
     except ParseFailed as e:
@@ -33,12 +39,22 @@ def main() -> None:
     for name, n in assembled.items():
         print(f"  {name}: {n}")
 
+    found = build_turns(db_path, transcripts_dir)
+    print(f"Turns from transcripts in {transcripts_dir}:")
+    for name, n in found.items():
+        print(f"  {name}: {n}")
+
+    resolved = record_operator_input(db_path, labels_dir)
+    print("Operator labels and names, matched to turns:")
+    for name, n in resolved.items():
+        print(f"  {name}: {n}")
+
     labeled = label_speakers(raw_dir, db_path, labels_dir, model_dir)
     print("Speaker embeddings and labels:")
     for name, n in labeled.items():
         print(f"  {name}: {n}")
 
-    grouped = group_people(db_path, labels_dir)
+    grouped = group_people(db_path)
     print("Anonymous speakers and names:")
     for name, n in grouped.items():
         print(f"  {name}: {n}")
@@ -50,7 +66,7 @@ def record_run(db_path: Path) -> None:
     """Record what produced this database, so a stale image is easy to spot."""
     info = {
         "commit": os.environ.get("HEARSAY_COMMIT", "unknown"),
-        "min_segment": speakers.MIN_SEGMENT,
+        "min_turn": speakers.MIN_TURN,
         "owner_threshold": speakers.OWNER_THRESHOLD,
         "not_owner_threshold": speakers.NOT_OWNER_THRESHOLD,
         "cluster_threshold": people.CLUSTER_THRESHOLD,
