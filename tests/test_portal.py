@@ -150,3 +150,25 @@ def test_forgetting_a_name_unnames_the_cluster(portal):
     db = sqlite3.connect(db_path)
     assert db.execute("SELECT DISTINCT person FROM turn_people").fetchall() == [(None,)]
     db.close()
+
+
+def test_renaming_a_person_renames_every_cluster_at_once(portal):
+    client, db_path, labels_dir = portal
+    log_in(client)
+    db = sqlite3.connect(db_path)
+    clusters = [c for (c,) in db.execute("SELECT DISTINCT cluster FROM turn_people ORDER BY cluster")]
+    db.close()
+    assert len(clusters) == 2
+    for c in clusters:
+        client.post(f"/cluster/{c}", data={"action": "name", "name": "Media"})
+
+    renamed = client.post("/person/Media", data={"name": "_media"}, follow_redirects=False)
+    assert renamed.headers["location"] == "/person/_media"
+    index = client.get("/").text
+    assert "People (1)" in index and "_media" in index and ">Media<" not in index
+    assert "2 cluster(s)" in client.get("/person/_media").text
+
+    reprocess_people(db_path, labels_dir)
+    db = sqlite3.connect(db_path)
+    assert db.execute("SELECT DISTINCT person FROM turn_people").fetchall() == [("_media",)]
+    db.close()

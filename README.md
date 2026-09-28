@@ -104,7 +104,10 @@ address. Each cluster plays a few samples. Type a name (reusing a name merges
 into that person), mark it as more than one person, or skip it for now: skipped
 clusters move to their own list and come round again after the rest. If you
 can't tell who it is (noise, several voices), skip rather than guess. A named
-cluster can be renamed, or its name forgotten, from its page.
+cluster can be renamed, or its name forgotten, from its page; a person can be
+renamed everywhere at once from theirs (renaming onto an existing name merges
+the two). Names starting with `_` (`_noise`, `_media`, `_stranger`) are for
+categories, not people.
 
 Names are stored on the segments you heard, in `/mnt/storage/hearsay/labels/`,
 so they survive reclustering and apply to every past conversation. The portal

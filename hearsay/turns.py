@@ -7,7 +7,8 @@ is pending until the dev box redoes it. Turn times are offsets into that WAV,
 so they line up with the audio by construction.
 
 The operator's labels and names are durable input that must survive
-re-transcription, so they are matched to turns by time, not by id. Older
+re-transcription, so they are matched to turns by time, not by id. The one
+exception is a rename, which names a person rather than turns. Older
 records name Omi segment ids and are placed via those segments' times; newer
 records carry their own spans. A turn inherits a record when the record's
 span covers at least half of the turn.
@@ -146,6 +147,13 @@ def resolve(db: sqlite3.Connection, labels_text: str, tags_text: str) -> Operato
             result.labels[turn_id] = record["label"]
     for line in tags_text.splitlines():
         record = json.loads(line)
+        if record["type"] == "rename":
+            # A person, not turns: every turn named "from" so far becomes "to",
+            # in any cluster. Renaming onto an existing name merges the two.
+            for turn_id, name in list(result.names.items()):
+                if name == record["from"]:
+                    result.names[turn_id] = record["to"]
+            continue
         for turn_id in covered(record):
             if record["type"] == "name" and record["name"]:
                 result.names[turn_id] = record["name"]

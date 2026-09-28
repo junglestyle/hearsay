@@ -231,7 +231,7 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             )
 
         people_items = "".join(
-            f"<li><a href='/cluster/{quote(clusters[0][0])}'>{html.escape(p)}</a>"
+            f"<li><a href='/person/{quote(p, safe='')}'>{html.escape(p)}</a>"
             f" <span class='muted'>{sum(n for _, n in clusters)} turns in {len(clusters)} cluster(s)</span></li>"
             for p, clusters in sorted(people.items())
         )
@@ -316,6 +316,49 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         todo, later = unnamed(grouped, *read_tags())
         following = [c for c in todo + later if c != cluster_id]
         return RedirectResponse(f"/cluster/{quote(following[0])}" if following else "/", status_code=303)
+
+    def person_clusters(grouped, names, person: str) -> list[str]:
+        return [c for c, turns in grouped.items() if cluster_name([s["turn_id"] for s in turns], names)[0] == person]
+
+    @app.get("/person/{person}")
+    async def show_person(request: Request, person: str) -> Response:
+        if not logged_in(request):
+            return RedirectResponse("/login", status_code=303)
+        grouped = load_clusters()
+        names, _, _ = read_tags()
+        clusters = person_clusters(grouped, names, person)
+        if not clusters:
+            return RedirectResponse("/", status_code=303)
+        items = "".join(
+            f"<li><a href='/cluster/{quote(c)}'>{len(grouped[c])} turns"
+            f" <span class='muted'>· {len({s['conversation_id'] for s in grouped[c]})} conversation(s)</span></a></li>"
+            for c in clusters
+        )
+        known = "".join(f"<option value='{html.escape(n)}'>" for n in sorted(set(names.values())) if n != person)
+        return page("Hearsay person", f"""
+<p><a href="/">← Speakers</a></p>
+<h1>{html.escape(person)}</h1>
+<p class="muted">{sum(len(grouped[c]) for c in clusters)} turns in {len(clusters)} cluster(s).
+Open a cluster to hear it, rename just that cluster, or forget its name.</p>
+<ul>{items}</ul>
+<form method="post" action="/person/{quote(person, safe='')}">
+  <label for="name">Rename everywhere. An existing name merges the two.</label>
+  <input id="name" name="name" list="known" autocomplete="off" autocapitalize="none" required>
+  <datalist id="known">{known}</datalist>
+  <button type="submit">Rename</button>
+</form>""")
+
+    @app.post("/person/{person}")
+    async def rename_person(request: Request, person: str) -> Response:
+        if not logged_in(request):
+            return RedirectResponse("/login", status_code=303)
+        form = parse_qs((await request.body()).decode())
+        new_name = " ".join(form.get("name", [""])[0].split())
+        names, _, _ = read_tags()
+        if not new_name or new_name == person or person not in names.values():
+            return RedirectResponse(f"/person/{quote(person, safe='')}", status_code=303)
+        append_tag({"type": "rename", "from": person, "to": new_name})
+        return RedirectResponse(f"/person/{quote(new_name, safe='')}", status_code=303)
 
     @app.get("/audio/{turn_id}")
     async def audio(request: Request, turn_id: str) -> Response:
