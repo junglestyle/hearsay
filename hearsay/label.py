@@ -2,8 +2,11 @@
 
 Naming other speakers happens in the web portal (hearsay/portal.py).
 
-Runs on the dev box, not in the container: it plays audio locally and reaches
-the NAS over `ssh nas`. Labels are the operator's durable input: they are
+Runs on the operator's own machine, not in the container: it plays audio
+locally and reaches the NAS over `ssh nas`. Standard library only, so any
+checkout works (`python3 -m hearsay.label`), or install it as a command with
+`uv tool install git+ssh://git@github.com/nathancurry/hearsay.git` and run
+`hearsay-label`. Labels are the operator's durable input: they are
 appended to the labels dir on the NAS and never rebuilt or overwritten.
 
     python -m hearsay.label enroll START END   # add an enrollment window
@@ -17,6 +20,7 @@ offset they are this machine's local time. Reprocess after enrolling.
 
 import json
 import random
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -95,7 +99,11 @@ def play(turn: dict) -> None:
     with tempfile.NamedTemporaryFile(suffix=".wav") as f:
         f.write(wav)
         f.flush()
-        subprocess.run(["paplay", f.name], check=True)
+        # paplay on Linux (PulseAudio/PipeWire), afplay on macOS.
+        player = shutil.which("paplay") or shutil.which("afplay")
+        if not player:
+            sys.exit("no audio player found: install PulseAudio/PipeWire (paplay) or use macOS (afplay)")
+        subprocess.run([player, f.name], check=True)
 
 
 def pick(unlabeled: list[dict]) -> dict:
@@ -257,7 +265,7 @@ def line(rows, label, predicate, threshold) -> str:
     return f"{threshold:.2f}  {len(predicted):7d}  {precision:>9} {recall:>6}"
 
 
-if __name__ == "__main__":
+def main() -> None:
     if sys.argv[1:2] == ["enroll"] and len(sys.argv) == 4:
         enroll(sys.argv[2], sys.argv[3])
     elif sys.argv[1:] == ["report"]:
@@ -268,3 +276,7 @@ if __name__ == "__main__":
         label_loop()
     else:
         sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    main()

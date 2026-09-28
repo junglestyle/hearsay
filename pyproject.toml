@@ -28,6 +28,10 @@ dev = [
     "scipy==1.18.1",
 ]
 
+[project.scripts]
+# The operator's labeling tool, installable anywhere with `uv tool install`.
+hearsay-label = "hearsay.label:main"
+
 [build-system]
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"

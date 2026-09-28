@@ -75,7 +75,12 @@ Raw is mounted read-only. Members of the `apps` group can read the outputs.
 
 Speaker labels need your voice enrolled, and thresholds tuned against segments
 you've labeled by ear. Your input lives in `/mnt/storage/hearsay/labels/`,
-which reprocessing reads but never writes. From the repo on the dev box:
+which reprocessing reads but never writes. The labeling tool runs on any
+machine of yours with `ssh nas` and an audio player (`paplay` or macOS
+`afplay`): from a checkout as `.venv/bin/python -m hearsay.label`, or installed
+as a command with
+`uv tool install git+ssh://git@github.com/nathancurry/hearsay.git`, then
+`hearsay-label` in place of `.venv/bin/python -m hearsay.label` below.
 
 1. Record yourself reading aloud for about 3 minutes, alone, with the pendant
    streaming. Then register the window (local time):
