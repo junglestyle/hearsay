@@ -30,3 +30,11 @@ def test_authorized_body_stored_verbatim_unauthorized_writes_nothing(tmp_path):
     for url in ["/omi/audio?uid=u", "/omi/audio?token=wrong&uid=u"]:
         assert client.post(url, content=body).status_code == 401
     assert all_files(tmp_path) == before
+
+
+def test_rejections_are_logged_without_the_token(tmp_path, caplog):
+    client = TestClient(create_app(tmp_path, "s3cret"))
+    caplog.set_level("WARNING", logger="hearsay.receiver")
+    client.post("/omi/audio?token=not-the-secret&uid=u", content=b"x")
+    assert len(caplog.records) == 1
+    assert "not-the-secret" not in caplog.text and "s3cret" not in caplog.text

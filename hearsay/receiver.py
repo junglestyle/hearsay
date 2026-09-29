@@ -1,18 +1,25 @@
 """Omi webhook receiver: authenticate, then write the body to disk verbatim.
 
 Omi can't send custom headers or sign requests, so the shared secret travels
-as a `token` query parameter. It is never written to disk.
+as a `token` query parameter. It is never written to disk or logged.
+
+Rejected requests are logged (type, whether a token was sent, and the
+Cloudflare client IP), so a sender with a wrong token shows up in
+`docker logs hearsay` instead of vanishing.
 """
 
 import hashlib
 import hmac
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
+
+log = logging.getLogger("hearsay.receiver")
 
 
 def write_atomically(path: Path, data: bytes) -> None:
@@ -30,6 +37,12 @@ def create_app(raw_dir: Path, secret: str) -> FastAPI:
     async def store(request: Request, webhook_type: str) -> Response:
         token = request.query_params.get("token", "")
         if not hmac.compare_digest(token.encode(), secret.encode()):
+            log.warning(
+                "rejected %s webhook: %s token, client %s",
+                webhook_type,
+                "wrong" if token else "no",
+                request.headers.get("cf-connecting-ip", "direct"),
+            )
             return Response(status_code=401)
 
         body = await request.body()
