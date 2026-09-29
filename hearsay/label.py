@@ -10,14 +10,17 @@ checkout works (`python3 -m hearsay.label`), or install it as a command with
 appended to the labels dir on the NAS and never rebuilt or overwritten.
 
     python -m hearsay.label enroll START END   # add an enrollment window
+    python -m hearsay.label import FILE START  # add audio the live stream missed
     python -m hearsay.label                    # label turns me / not me, blind
     python -m hearsay.label review             # re-hear labels the model disagrees with
     python -m hearsay.label report             # precision/recall, cluster health
 
-START and END are ISO-8601 times, e.g. 2026-09-27T10:05; without a UTC
-offset they are this machine's local time. Reprocess after enrolling.
+START and END are ISO-8601 times, e.g. 2026-09-27T10:05 or "2026-09-27 10:05";
+without a UTC offset they are this machine's local time. For an import, START
+is when the recording began, as the Omi app shows it. Reprocess afterwards.
 """
 
+import hashlib
 import json
 import random
 import shutil
@@ -25,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 
 from hearsay.people import CLUSTER_THRESHOLD
 from hearsay.speakers import NOT_OWNER_THRESHOLD, OWNER_THRESHOLD
@@ -35,6 +39,7 @@ DB = "/mnt/storage/hearsay/db/hearsay.sqlite"
 AUDIO_DIR = "/mnt/storage/hearsay/audio"
 LABELS = "/mnt/storage/hearsay/labels/labels.jsonl"
 ENROLLMENT = "/mnt/storage/hearsay/labels/enrollment.json"
+IMPORTS = "/mnt/storage/hearsay/imports"
 ANSWERS = {"m": "owner", "n": "not_owner", "u": "unsure"}
 
 CANDIDATES_SQL = """
@@ -207,6 +212,31 @@ def enroll(start: str, end: str) -> None:
     print(f"Enrolled {window['start']} to {window['end']} ({len(windows)} window(s)). Now reprocess on the NAS.")
 
 
+def import_audio(file: str, start: str) -> None:
+    """Copy an audio file, unchanged, into the NAS imports dir with its start time."""
+    path = Path(file).expanduser()
+    data = path.read_bytes()
+    sha = hashlib.sha256(data).hexdigest()
+    began = datetime.fromisoformat(start).astimezone(timezone.utc)
+    if ssh(["sh", "-c", f"'grep -l {sha} {IMPORTS}/*.json 2>/dev/null || true'"]).strip():
+        print(f"{path.name} is already imported.")
+        return
+    name = f"{began:%Y%m%dT%H%M%SZ}-{sha[:12]}{path.suffix.lower()}"
+    ssh(["sh", "-c", f"'cat > {IMPORTS}/{name}.tmp && mv {IMPORTS}/{name}.tmp {IMPORTS}/{name}'"], data)
+    # The sidecar goes last: its presence means the file is complete.
+    sidecar = {
+        "file": name,
+        "start": began.isoformat(),
+        "original_name": path.name,
+        "sha256": sha,
+        "imported_at": datetime.now(timezone.utc).isoformat(),
+    }
+    target = f"{IMPORTS}/{name}.json"
+    ssh(["sh", "-c", f"'cat > {target}.tmp && mv {target}.tmp {target}'"], json.dumps(sidecar, indent=2).encode())
+    local = began.astimezone()
+    print(f"Imported {path.name} as starting {local:%Y-%m-%d %H:%M %Z} ({began:%H:%M} UTC). Reprocess on the NAS.")
+
+
 def report() -> None:
     try:
         built = ssh(["sqlite3", DB], b"SELECT key || '=' || value FROM reprocess_info;").decode().split()
@@ -271,6 +301,8 @@ def line(rows, label, predicate, threshold) -> str:
 def main() -> None:
     if sys.argv[1:2] == ["enroll"] and len(sys.argv) == 4:
         enroll(sys.argv[2], sys.argv[3])
+    elif sys.argv[1:2] == ["import"] and len(sys.argv) == 4:
+        import_audio(sys.argv[2], sys.argv[3])
     elif sys.argv[1:] == ["report"]:
         report()
     elif sys.argv[1:] == ["review"]:

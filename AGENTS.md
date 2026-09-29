@@ -50,6 +50,10 @@ nothing depends on them.
   spans relative to an Omi conversation) and are placed via
   `turns.omi_timeline`, recomputed from raw. Records that fall outside every
   conversation are kept and simply match nothing.
+- Audio the live stream missed can be imported (`hearsay-label import`):
+  stored unchanged with its operator-given start time in the imports dir,
+  decoded (ffmpeg) and placed before the live stream, so live audio wins
+  overlaps (`hearsay/imports.py`). Imports are never modified, like raw.
 - Short self-notes (under 30 s of speech) are dropped for now; the plan is to
   capture them with the pendant button once the own capture app exists
   (slice 9).

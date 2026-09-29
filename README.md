@@ -97,6 +97,20 @@ as a command with
    then set `OWNER_THRESHOLD` / `NOT_OWNER_THRESHOLD` in
    [`hearsay/speakers.py`](hearsay/speakers.py), deploy, and reprocess.
 
+## Importing audio the live stream missed
+
+If Omi recorded something that never reached Hearsay (its webhooks stopped,
+say), export the conversation's audio from the Omi app and import it with the
+start time the app shows, in your local time:
+
+```sh
+hearsay-label import ~/Downloads/omi_export.mp3 "2026-09-28 19:42"
+```
+
+It is copied unchanged to `/mnt/storage/hearsay/imports/` over `ssh nas` and
+placed on the timeline at that time on the next reprocess; where it overlaps
+live audio, the live audio wins. Importing the same file twice does nothing.
+
 ## Naming other speakers (phone or any browser)
 
 Reprocessing groups not-owner segments into anonymous speaker clusters. Name

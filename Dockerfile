@@ -7,8 +7,9 @@ COPY hearsay /src/hearsay
 RUN pip install --no-cache-dir /src && rm -rf /src
 
 # Reprocessing: adds torch (CPU) and the speaker model, pinned to a commit and
-# baked in so runs are offline and repeatable.
+# baked in so runs are offline and repeatable, and ffmpeg to decode imports.
 FROM app AS worker
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml /src/
 COPY hearsay /src/hearsay
 RUN pip install --no-cache-dir torch==2.14.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cpu \

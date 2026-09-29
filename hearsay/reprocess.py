@@ -12,6 +12,7 @@ from pathlib import Path
 
 from hearsay.assemble import assemble
 from hearsay.conversations import find_conversations
+from hearsay.imports import load_imports
 from hearsay.parse import ParseFailed, rebuild
 from hearsay.people import group_people
 from hearsay import conversations, people, speakers
@@ -26,6 +27,7 @@ def main() -> None:
     labels_dir = Path(os.environ["HEARSAY_LABELS_DIR"])
     model_dir = Path(os.environ["HEARSAY_MODEL_DIR"])
     transcripts_dir = Path(os.environ["HEARSAY_TRANSCRIPTS_DIR"])
+    imports_dir = Path(os.environ["HEARSAY_IMPORTS_DIR"])
     try:
         parsed = rebuild(raw_dir, db_path)
     except ParseFailed as e:
@@ -34,6 +36,12 @@ def main() -> None:
         sys.exit(1)
     print(f"Rebuilt {db_path} from {raw_dir}:")
     for name, n in parsed.items():
+        print(f"  {name}: {n}")
+
+    # Decoded imports are derived, so they're cached next to the database.
+    imported = load_imports(imports_dir, db_path, db_path.parent / "imports-pcm")
+    print(f"Imported audio from {imports_dir}:")
+    for name, n in imported.items():
         print(f"  {name}: {n}")
 
     found_conversations = find_conversations(raw_dir, db_path)

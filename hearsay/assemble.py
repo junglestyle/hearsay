@@ -46,7 +46,12 @@ def timestamp(iso: str) -> float:
 
 
 def place_bursts(db: sqlite3.Connection) -> list[tuple[float, float, list[str]]]:
-    """Return (start, end, body paths) per burst, in wall-clock seconds."""
+    """Return (start, end, body paths) per burst, in wall-clock seconds.
+
+    Imported audio (hearsay/imports.py) comes first, one burst per import with
+    an absolute path to its decoded PCM, so live audio laid after it wins
+    wherever the two overlap.
+    """
     rows = db.execute(
         "SELECT p.path, p.received_at, p.body_bytes, a.sample_rate FROM audio_chunks a"
         " JOIN payloads p ON p.path = a.payload_path ORDER BY p.received_at, p.path"
@@ -64,6 +69,11 @@ def place_bursts(db: sqlite3.Connection) -> list[tuple[float, float, list[str]]]
             bursts.append([t, t, body_bytes, [path]])
 
     placed = []
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name = 'imported_audio'").fetchone():
+        for start, duration, pcm_path in db.execute(
+            "SELECT start, duration, pcm_path FROM imported_audio ORDER BY start, file"
+        ):
+            placed.append((start, start + duration, [pcm_path]))
     position = None
     for first_receipt, _, nbytes, paths in bursts:
         duration = nbytes / BYTES_PER_SECOND
@@ -84,8 +94,16 @@ def cut(raw_dir: Path, bursts: list, start: float, duration: float) -> tuple[byt
     for b_start, b_end, paths in bursts:
         if b_end <= start or b_start >= start + duration:
             continue
-        audio = b"".join((raw_dir / p).read_bytes() for p in paths)
         offset = round((b_start - start) * SAMPLE_RATE)
+        if paths[0].endswith(".pcm"):
+            # A decoded import can be an hour long: read only the part needed.
+            skip = max(0, -offset)
+            with open(paths[0], "rb") as f:
+                f.seek(skip * 2)
+                audio = f.read((total - max(0, offset)) * 2)
+            offset += skip
+        else:
+            audio = b"".join((raw_dir / p).read_bytes() for p in paths)
         lo, hi = max(0, offset), min(total, offset + len(audio) // 2)
         pcm[lo * 2 : hi * 2] = audio[(lo - offset) * 2 : (hi - offset) * 2]
         covered.append((lo, hi))
