@@ -64,7 +64,7 @@ def test_rebuild_parses_every_type_is_repeatable_and_leaves_raw_untouched(tmp_pa
 
     assert snapshot(raw) == before
     assert dump(tmp_path / "a.sqlite") == dump(tmp_path / "b.sqlite")
-    assert counts == {"transcript": 2, "audio": 2, "memory": 1, "duplicate": 1, "incomplete": 1}
+    assert counts == {"transcript": 2, "audio": 2, "memory": 1, "capture": 0, "duplicate": 1, "incomplete": 1}
 
     db = sqlite3.connect(tmp_path / "a.sqlite")
     live = db.execute(

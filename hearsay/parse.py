@@ -1,4 +1,5 @@
-"""Rebuild the SQLite database from raw webhook payloads.
+"""Rebuild the SQLite database from raw payloads: Omi's webhooks and our
+recorder's uploads (hearsay/capture.py).
 
 Every run is a full rebuild: raw is the only source of truth, and the database
 is a disposable view of it. Nothing here writes to raw.
@@ -14,10 +15,12 @@ import os
 import sqlite3
 from pathlib import Path
 
+from hearsay import capture
+
 SCHEMA = """
 CREATE TABLE payloads (
     path TEXT PRIMARY KEY,           -- body file, relative to the raw dir
-    type TEXT NOT NULL,              -- transcript | audio | memory
+    type TEXT NOT NULL,              -- transcript | audio | memory | capture
     received_at TEXT NOT NULL,
     uid TEXT,
     idempotency_key TEXT,
@@ -84,6 +87,14 @@ CREATE TABLE memory_audio_files (
 CREATE TABLE audio_chunks (
     payload_path TEXT PRIMARY KEY REFERENCES payloads(path),
     sample_rate INTEGER NOT NULL
+);
+
+-- Presses of the pendant's button, from capture uploads. Audio from those
+-- uploads is decoded later (hearsay/capture.py); its bytes stay in raw.
+CREATE TABLE button_events (
+    payload_path TEXT NOT NULL REFERENCES payloads(path),
+    at REAL NOT NULL,                -- unix seconds, on the recorder's clock
+    event INTEGER NOT NULL           -- 1 tap, 2 double tap, 5 release after a hold
 );
 """
 
@@ -160,8 +171,14 @@ def parse_audio(db: sqlite3.Connection, path: str, body: bytes, query: dict) -> 
     db.execute("INSERT INTO audio_chunks VALUES (?,?)", (path, int(query["sample_rate"])))
 
 
+def parse_capture(db: sqlite3.Connection, path: str, body: bytes) -> None:
+    for at, kind, data in capture.read_records(body):
+        if kind == capture.BUTTON:
+            db.execute("INSERT INTO button_events VALUES (?,?,?)", (path, at, capture.button_event(data)))
+
+
 def load_payloads(db: sqlite3.Connection, raw_dir: Path) -> tuple[dict, list[str]]:
-    counts = {"transcript": 0, "audio": 0, "memory": 0, "duplicate": 0}
+    counts = {"transcript": 0, "audio": 0, "memory": 0, "capture": 0, "duplicate": 0}
     errors = []
     sidecars = []
     for sidecar_path in raw_dir.glob("*/*/*.json"):
@@ -199,6 +216,8 @@ def load_payloads(db: sqlite3.Connection, raw_dir: Path) -> tuple[dict, list[str
                 parse_memory(db, path, body)
             elif webhook_type == "audio":
                 parse_audio(db, path, body, query)
+            elif webhook_type == "capture":
+                parse_capture(db, path, body)
             else:
                 raise ValueError(f"unknown webhook type {webhook_type!r}")
             counts[webhook_type] += 1

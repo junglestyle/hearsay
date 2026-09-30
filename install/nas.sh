@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TrueNAS SCALE: datasets, secrets, images, receiver and portal containers.
+# TrueNAS SCALE: datasets, secrets, images, receiver, portal and capture containers.
 # Run as root from the cloned repo. Safe to re-run; also how updates are deployed.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
@@ -50,6 +50,9 @@ env_ensure "$NAS_PORTAL_ENV" HEARSAY_PORTAL_USER hearsay
 env_ensure "$NAS_PORTAL_ENV" HEARSAY_PORTAL_PASSWORD "$(openssl rand -base64 24 | tr -d '/+=')"
 env_ensure "$NAS_PORTAL_ENV" HEARSAY_SESSION_KEY "$(openssl rand -hex 32)"
 
+say "Capture token in $NAS_CAPTURE_ENV"
+env_ensure "$NAS_CAPTURE_ENV" HEARSAY_CAPTURE_TOKEN "$(openssl rand -hex 32)"
+
 say "Portal addresses (LAN and tailnet only)"
 # Bound to these two addresses, never all interfaces: the NAS also has a
 # public IPv6 address, and non-owner audio must stay on the LAN and tailnet.
@@ -70,7 +73,7 @@ export HEARSAY_COMMIT
 # --profile tools also builds the one-shot worker (reprocess) and check images.
 docker compose -f "$REPO_DIR/install/compose.yaml" --profile tools build
 
-say "Starting receiver and portal"
+say "Starting receiver, portal and capture receiver"
 docker compose -f "$REPO_DIR/install/compose.yaml" up -d
 
 say "Verifying receiver rejects unauthenticated requests"
@@ -106,6 +109,12 @@ for ip in "$HEARSAY_LAN_IP" "$HEARSAY_TAILNET_IP"; do
     wait_for_status GET "http://$ip:$NAS_PORTAL_PORT/login" 200 30
 done
 
+say "Verifying the capture receiver answers on the tailnet only"
+wait_for_401 "http://$HEARSAY_TAILNET_IP:$NAS_CAPTURE_PORT/capture" 30
+if curl -s -o /dev/null --max-time 3 "http://$HEARSAY_LAN_IP:$NAS_CAPTURE_PORT/capture"; then
+    die "the capture receiver answers on the LAN address; it must be tailnet only"
+fi
+
 say "Checking that every captured payload parses"
 # -T and /dev/null: never read the terminal, so typing ahead isn't swallowed.
 docker compose -f "$REPO_DIR/install/compose.yaml" run --rm -T check </dev/null
@@ -119,4 +128,8 @@ Portal for naming speakers (save it in your password manager):
   http://$HEARSAY_LAN_IP:$NAS_PORTAL_PORT   (LAN: unencrypted Wi-Fi)
   username: $(env_get "$NAS_PORTAL_ENV" HEARSAY_PORTAL_USER)
   password: sudo sed -n 's/^HEARSAY_PORTAL_PASSWORD=//p' $NAS_PORTAL_ENV
+
+Capture receiver, for install/mac.sh on the Mac:
+  URL:   http://$HEARSAY_TAILNET_IP:$NAS_CAPTURE_PORT/capture
+  token: sudo sed -n 's/^HEARSAY_CAPTURE_TOKEN=//p' $NAS_CAPTURE_ENV
 EOF

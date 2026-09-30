@@ -81,14 +81,28 @@ or Hearsay's internals.
 
 ## 9. Own capture app
 
-A pared-down app, built from Omi's open-source app (check the license of
-what's reused): pendant over BLE, straight to Hearsay over the tailnet.
-No Omi cloud, no upsells. Replaces the webhook path.
+Pendant over BLE, straight to Hearsay over the tailnet. No Omi cloud, no
+upsells. Replaces the webhook path. Protocol details come from Omi's
+open-source firmware and apps (check the license of anything reused).
+Pressing the pendant's button marks a short self-note, which is kept even
+when it's shorter than a conversation.
+
+A Mac recorder comes first, to prove the protocol, the upload and the
+stored format. The iPhone app follows and reuses both.
 
 Done when: a day of capture reaches Hearsay with Omi's cloud out of the
 loop.
 
-## 10. Retention
+## 10. Zoom calls on the Mac
+
+Record calls on the Mac: the owner's mic and the call's audio as separate
+channels, uploaded the same way as pendant audio. During a call, the call
+recording wins over the pendant's, and mic-channel speech is the owner's.
+
+Done when: a Zoom call's utterances reach the stream with the owner
+attributed by channel.
+
+## 11. Retention
 
 Delete non-owner audio after embedding and transcription. Starts only
 once tagging is reliable: until then all audio is kept, because deleted

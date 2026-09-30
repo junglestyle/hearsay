@@ -19,6 +19,7 @@ from pathlib import Path
 from hearsay import conversations, people, speakers
 from hearsay.assemble import assemble, remove_stale_wavs
 from hearsay.cache import Cache
+from hearsay.capture import load_captures
 from hearsay.conversations import find_conversations
 from hearsay.imports import load_imports
 from hearsay.parse import ParseFailed, rebuild
@@ -43,6 +44,7 @@ def run(raw_dir: Path, db_path: Path, audio_dir: Path, labels_dir: Path, model_d
         # Decoded imports are derived, so they're cached next to the database.
         report(f"Imported audio from {imports_dir}:",
                load_imports(imports_dir, staging, db_path.parent / "imports-pcm"))
+        report("Audio from the recorder:", load_captures(raw_dir, staging, db_path.parent / "capture-pcm"))
         report("Conversations found in the audio stream:", find_conversations(raw_dir, staging, cache))
         report(f"Assembled conversation audio in {audio_dir}:", assemble(raw_dir, staging, audio_dir))
         report(f"Turns from transcripts in {transcripts_dir}:", build_turns(staging, transcripts_dir))

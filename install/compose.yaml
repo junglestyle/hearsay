@@ -40,6 +40,25 @@ services:
     command: ["uvicorn", "--factory", "hearsay.portal:app_from_env", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
 
+  # Uploads from our own recorder (capture/): pendant audio, so tailnet only.
+  # Never the LAN (the recorder reaches the NAS over the tailnet from
+  # anywhere), never 0.0.0.0, never the Cloudflare tunnel.
+  capture:
+    image: hearsay
+    pull_policy: never
+    container_name: hearsay-capture
+    user: "568:568"
+    env_file: /mnt/storage/hearsay/config/capture.env
+    environment:
+      HEARSAY_RAW_DIR: /data/raw
+    volumes:
+      - /mnt/storage/hearsay/raw:/data/raw
+    ports:
+      - "${HEARSAY_TAILNET_IP:-127.0.0.2}:8789:8000"
+    command: ["uvicorn", "--factory", "hearsay.receiver:capture_app_from_env", "--host", "0.0.0.0", "--port", "8000",
+              "--no-access-log"]
+    restart: unless-stopped
+
   # One-shot, not started by `up`: rebuilds the database, conversation audio
   # and speaker labels from raw. The labels dir holds the operator's own input
   # (enrollment windows, labels), which reprocessing reads but never writes.

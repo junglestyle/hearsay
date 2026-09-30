@@ -32,8 +32,14 @@ Secrets are kept in env files outside the repo.
    from the NAS over `ssh nas` and writes transcripts back. It asks for a
    Hugging Face token for the gated diarization model. Then reprocess again.
 
-To update, run `git pull` on both hosts, then re-run `install/nas.sh` on the
-NAS and `install/gpu.sh` on the dev box.
+6. **Mac, as your user (replaces Omi's app and cloud as the audio path):**
+   [`install/mac.sh`](install/mac.sh) builds the pendant recorder and runs it
+   as a launchd agent. It asks for the capture URL and token that `nas.sh`
+   prints. Before its last step, disconnect the pendant from Omi's app on your
+   phone: the pendant takes one connection at a time.
+
+To update, run `git pull` on every host, then re-run `install/nas.sh` on the
+NAS, `install/gpu.sh` on the dev box and `install/mac.sh` on the Mac.
 
 ## Data
 
@@ -45,6 +51,20 @@ Webhooks land in `/mnt/storage/hearsay/raw/<type>/<date>/`:
 
 Omi's cloud backend sends every webhook, not the phone. The `cf-connecting-ip`
 header in the sidecars records where each request came from.
+
+## Recording from the pendant (Mac)
+
+The recorder ([`capture/`](capture/)) connects to the Omi pendant over
+Bluetooth, keeps everything it sends on the Mac's disk
+(`~/.local/share/hearsay/capture-spool/`), and uploads it every minute to the
+capture receiver on the NAS, which listens on the tailnet only and stores each
+upload in `raw/capture/`. If the NAS is unreachable, uploads wait on the Mac
+and go when it's back. Log: `~/Library/Logs/hearsay-capture.log`, with a line
+a minute counting audio packets, lost packets and button presses.
+
+Tap the pendant's button once to keep what you say near the tap, from 30 s
+before it to 30 s after you stop, even when it's too short to count as a
+conversation otherwise. Holding the button for 3 s turns the pendant off.
 
 ## Reprocessing
 
@@ -107,7 +127,8 @@ as a command with
 output, rewritten after every hourly reprocess:
 
 - `index.json`: every conversation with start, end, `open` (still going when
-  the audio stopped), `transcribed`, utterance count, `revision`, and `file`.
+  the audio stopped), `transcribed`, `taps` (times the owner tapped the
+  pendant's button near it), utterance count, `revision`, and `file`.
 - `conversations/<conversation_id>.jsonl`: one utterance per line, in time
   order; fields are described under Output contract in `AGENTS.md`.
 

@@ -111,6 +111,9 @@ def write_stream(db_path: Path, stream_dir: Path) -> dict:
     try:
         found = utterances(db)
         conversations = db.execute("SELECT conversation_id, start, end, open FROM conversations ORDER BY start").fetchall()
+        taps = {}
+        for conversation_id, at in db.execute("SELECT conversation_id, at FROM conversation_taps ORDER BY at"):
+            taps.setdefault(conversation_id, []).append(iso(at))
     finally:
         db.close()
 
@@ -120,6 +123,7 @@ def write_stream(db_path: Path, stream_dir: Path) -> dict:
     for conversation_id, start, end, is_open in conversations:
         entry = {"conversation_id": conversation_id, "start": iso(start), "end": iso(end),
                  "open": bool(is_open), "transcribed": conversation_id in found,
+                 "taps": taps.get(conversation_id, []),
                  "utterances": 0, "revision": None, "file": None}
         if conversation_id in found:
             data = "".join(json.dumps(u, ensure_ascii=False) + "\n" for u in found[conversation_id]).encode()

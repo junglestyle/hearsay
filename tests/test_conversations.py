@@ -1,4 +1,4 @@
-from hearsay.conversations import GAP, MIN_SPEECH, conversation_id, group_speech
+from hearsay.conversations import GAP, MIN_SPEECH, TAP_WINDOW, conversation_id, group_speech
 
 T = 1_790_000_000.0  # unix seconds
 
@@ -21,3 +21,12 @@ def test_silence_longer_than_the_gap_splits_and_short_talk_is_dropped():
 
 def test_conversation_ids_come_from_the_first_speech_so_they_are_stable_as_it_grows():
     assert conversation_id(T) == conversation_id(T + 0.9) == "c20260921T141320Z"
+
+
+def test_a_tap_keeps_a_short_self_note_but_only_near_it():
+    note = (T, T + 8)
+    remark = (T + 5 * GAP, T + 5 * GAP + 8)
+    # Tapped just before speaking, or just after finishing: kept either way.
+    for tap in (T - TAP_WINDOW + 1, T + 8 + TAP_WINDOW - 1):
+        assert group_speech([note, remark], [tap]) == [(T, T + 8, 8.0)]
+    assert group_speech([note, remark], [T - TAP_WINDOW - 1]) == []

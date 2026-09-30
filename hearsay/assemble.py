@@ -50,7 +50,9 @@ def place_bursts(db: sqlite3.Connection) -> list[tuple[float, float, list[str]]]
 
     Imported audio (hearsay/imports.py) comes first, one burst per import with
     an absolute path to its decoded PCM, so live audio laid after it wins
-    wherever the two overlap.
+    wherever the two overlap. Our recorder's audio (hearsay/capture.py) comes
+    next, one burst per run, then Omi's webhook audio. The recorder and Omi's
+    app can't both be connected to the pendant, so those two never overlap.
     """
     rows = db.execute(
         "SELECT p.path, p.received_at, p.body_bytes, a.sample_rate FROM audio_chunks a"
@@ -72,6 +74,11 @@ def place_bursts(db: sqlite3.Connection) -> list[tuple[float, float, list[str]]]
     if db.execute("SELECT 1 FROM sqlite_master WHERE name = 'imported_audio'").fetchone():
         for start, duration, pcm_path in db.execute(
             "SELECT start, duration, pcm_path FROM imported_audio ORDER BY start, file"
+        ):
+            placed.append((start, start + duration, [pcm_path]))
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name = 'captured_audio'").fetchone():
+        for start, duration, pcm_path in db.execute(
+            "SELECT start, duration, pcm_path FROM captured_audio ORDER BY start"
         ):
             placed.append((start, start + duration, [pcm_path]))
     position = None
@@ -96,7 +103,8 @@ def cut(raw_dir: Path, bursts: list, start: float, duration: float) -> tuple[byt
             continue
         offset = round((b_start - start) * SAMPLE_RATE)
         if paths[0].endswith(".pcm"):
-            # A decoded import can be an hour long: read only the part needed.
+            # Decoded audio (an import, a recorder run) can be hours long:
+            # read only the part needed.
             skip = max(0, -offset)
             with open(paths[0], "rb") as f:
                 f.seek(skip * 2)

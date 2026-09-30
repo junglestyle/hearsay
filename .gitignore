@@ -18,6 +18,8 @@ audio/
 *.npy
 *.npz
 enrollment/
+*.upload
+*.rec
 
 # --- Secrets ---
 .env
@@ -40,6 +42,9 @@ dist/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# --- Swift ---
+.build/
 
 # --- Models / caches ---
 models/

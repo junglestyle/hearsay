@@ -19,6 +19,10 @@ owner_similarity}. Speaker kinds: owner, person (named), anonymous (labeled
 per conversation, e.g. "anon A"), stranger, unknown. `_noise` and `_media`
 turns are left out; other `_` names are categories, not people.
 
+Each index entry also lists `taps`: when the owner tapped the pendant's
+button near that conversation (a self-note, kept even when it's short). It
+is a fact about the capture, not an interpretation of it.
+
 Speakers and text change after the fact (naming is retroactive, growing
 conversations are re-transcribed), so the unit of change is a conversation:
 consumers re-read conversations whose index revision changed and replace them
@@ -45,14 +49,16 @@ Downstream consumers read this. They never receive audio.
 
 ## Current slice
 
-Slice 8: the utterance stream (see Output contract). It is written from the
-database after every hourly reprocess, once the new database is in place, so
-the stream always matches it. Files are written atomically, only when their
-content changes, with the index last. Idea Machine is the first consumer.
+Slice 9: own capture. A Mac recorder (`capture/`, Swift) connects to the
+Omi pendant over BLE and uploads what it sends, verbatim and timestamped on
+arrival, to the capture receiver on the NAS (tailnet only). Reprocess
+decodes it (`hearsay/capture.py`) onto the same timeline as Omi's webhook
+audio. A single tap on the pendant keeps nearby speech as a conversation
+however short it is. Next in this slice: downloading what the pendant
+stored while out of range, then the iPhone app.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when a downstream consumer reads utterances without touching audio or
-Hearsay's internals.
+Done when a day of capture reaches Hearsay with Omi's cloud out of the loop.
 
 ## Engineering style
 

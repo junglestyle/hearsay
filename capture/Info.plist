@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.hearsay.capture</string>
+    <key>CFBundleName</key>
+    <string>hearsay-capture</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Hearsay records audio from your Omi pendant over Bluetooth.</string>
+</dict>
+</plist>
