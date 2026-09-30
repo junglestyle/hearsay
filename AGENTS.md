@@ -10,8 +10,19 @@ understanding what was said, it is out of scope.
 
 ## Output contract
 
-The product of Hearsay is a stream of utterance records:
-conversation_id, start/end timestamps, speaker, text, confidence.
+The product of Hearsay is a stream of utterance records (`hearsay/stream.py`,
+written to `/mnt/storage/hearsay/stream/` after every reprocess): one JSONL
+file per conversation plus `index.json`. Each utterance has conversation_id,
+utterance_id, start/end (UTC), speaker {kind, name, label}, text,
+text_confidence (WhisperX word scores) and speaker_confidence {basis,
+owner_similarity}. Speaker kinds: owner, person (named), anonymous (labeled
+per conversation, e.g. "anon A"), stranger, unknown. `_noise` and `_media`
+turns are left out; other `_` names are categories, not people.
+
+Speakers and text change after the fact (naming is retroactive, growing
+conversations are re-transcribed), so the unit of change is a conversation:
+consumers re-read conversations whose index revision changed and replace them
+wholesale. utterance_id is stable only while a conversation's transcript is.
 Downstream consumers read this. They never receive audio.
 
 ## Invariants
@@ -34,33 +45,14 @@ Downstream consumers read this. They never receive audio.
 
 ## Current slice
 
-Slice 7: our own conversation boundaries. Reprocess runs voice activity
-detection (Silero, pinned in the worker image) over the continuous audio
-stream (`hearsay/conversations.py`); a conversation ends after 3 minutes
-without speech, and one with under 30 s of speech is dropped. Content is never
-consulted, so there is no length cap; splitting by topic belongs downstream.
-Omi's transcript and memory webhooks still arrive and stay in raw, but
-nothing depends on them.
-
-- Conversation ids are `c` + the UTC time of the first speech, so they stay
-  stable while a conversation grows. One still going when the audio stops is
-  marked open; the next reprocess extends it and the dev box re-transcribes.
-- Operator input is matched to turns by absolute time. New records store
-  `at` spans (UTC); older ones point into Omi's timeline (segment ids, or
-  spans relative to an Omi conversation) and are placed via
-  `turns.omi_timeline`, recomputed from raw. Records that fall outside every
-  conversation are kept and simply match nothing.
-- Audio the live stream missed can be imported (`hearsay-label import`):
-  stored unchanged with its operator-given start time in the imports dir,
-  decoded (ffmpeg) and placed before the live stream, so live audio wins
-  overlaps (`hearsay/imports.py`). Imports are never modified, like raw.
-- Short self-notes (under 30 s of speech) are dropped for now; the plan is to
-  capture them with the pendant button once the own capture app exists
-  (slice 9).
+Slice 8: the utterance stream (see Output contract). It is written from the
+database after every hourly reprocess, once the new database is in place, so
+the stream always matches it. Files are written atomically, only when their
+content changes, with the index last. Idea Machine is the first consumer.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when conversations are found without any Omi transcript or memory
-payload, including ones Omi never sent.
+Done when a downstream consumer reads utterances without touching audio or
+Hearsay's internals.
 
 ## Engineering style
 

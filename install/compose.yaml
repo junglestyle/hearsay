@@ -60,6 +60,7 @@ services:
       HEARSAY_LABELS_DIR: /data/labels
       HEARSAY_TRANSCRIPTS_DIR: /data/transcripts
       HEARSAY_IMPORTS_DIR: /data/imports
+      HEARSAY_STREAM_DIR: /data/stream
     volumes:
       - /mnt/storage/hearsay/raw:/data/raw:ro
       - /mnt/storage/hearsay/db:/data/db
@@ -67,6 +68,7 @@ services:
       - /mnt/storage/hearsay/labels:/data/labels:ro
       - /mnt/storage/hearsay/transcripts:/data/transcripts:ro
       - /mnt/storage/hearsay/imports:/data/imports:ro
+      - /mnt/storage/hearsay/stream:/data/stream
     command: ["python", "-m", "hearsay.reprocess"]
 
   # One-shot: the test suite, including the check that every real capture reprocesses.

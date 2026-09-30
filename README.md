@@ -101,6 +101,21 @@ as a command with
    then set `OWNER_THRESHOLD` / `NOT_OWNER_THRESHOLD` in
    [`hearsay/speakers.py`](hearsay/speakers.py), deploy, and reprocess.
 
+## Reading the utterance stream (consumers)
+
+`/mnt/storage/hearsay/stream/` (readable by the `apps` group) holds Hearsay's
+output, rewritten after every hourly reprocess:
+
+- `index.json`: every conversation with start, end, `open` (still going when
+  the audio stopped), `transcribed`, utterance count, `revision`, and `file`.
+- `conversations/<conversation_id>.jsonl`: one utterance per line, in time
+  order; fields are described under Output contract in `AGENTS.md`.
+
+Treat each conversation as a unit: when its `revision` changes, re-read its
+file and replace everything you had for it. Names apply retroactively and
+conversations get re-transcribed as they grow, so individual utterances can
+change or disappear. No audio is ever in the stream.
+
 ## Importing audio the live stream missed
 
 If Omi recorded something that never reached Hearsay (its webhooks stopped,

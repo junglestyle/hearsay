@@ -1,5 +1,5 @@
 """Rebuild everything derived from raw: database, conversations, conversation
-audio, turns, speaker labels, people.
+audio, turns, speaker labels, people, and the utterance stream.
 
 Turns come from transcripts the dev box makes of each WAV (hearsay/transcribe.py),
 so new audio takes a reprocess, a transcription run, then another reprocess.
@@ -24,6 +24,7 @@ from hearsay.imports import load_imports
 from hearsay.parse import ParseFailed, rebuild
 from hearsay.people import group_people
 from hearsay.speakers import label_speakers
+from hearsay.stream import write_stream
 from hearsay.turns import build_turns, record_operator_input
 
 
@@ -34,7 +35,7 @@ def report(title: str, counts: dict) -> None:
 
 
 def run(raw_dir: Path, db_path: Path, audio_dir: Path, labels_dir: Path, model_dir: Path,
-        transcripts_dir: Path, imports_dir: Path) -> None:
+        transcripts_dir: Path, imports_dir: Path, stream_dir: Path) -> None:
     staging = db_path.with_name(db_path.name + ".building")
     cache = Cache(db_path.parent / "cache.sqlite")
     try:
@@ -53,6 +54,8 @@ def run(raw_dir: Path, db_path: Path, audio_dir: Path, labels_dir: Path, model_d
     finally:
         cache.close()
         staging.unlink(missing_ok=True)
+    # From the database now in place, so the stream always matches it.
+    report(f"Utterance stream in {stream_dir}:", write_stream(db_path, stream_dir))
     print(f"Replaced {db_path}; removed {remove_stale_wavs(audio_dir, db_path)} stale WAV(s).")
 
 
@@ -79,10 +82,11 @@ def record_run(db_path: Path) -> None:
 
 def main() -> None:
     env = {name: Path(os.environ[f"HEARSAY_{name.upper()}"]) for name in
-           ("raw_dir", "db", "audio_dir", "labels_dir", "model_dir", "transcripts_dir", "imports_dir")}
+           ("raw_dir", "db", "audio_dir", "labels_dir", "model_dir", "transcripts_dir", "imports_dir",
+            "stream_dir")}
     try:
         run(env["raw_dir"], env["db"], env["audio_dir"], env["labels_dir"], env["model_dir"],
-            env["transcripts_dir"], env["imports_dir"])
+            env["transcripts_dir"], env["imports_dir"], env["stream_dir"])
     except ParseFailed as e:
         print(e, file=sys.stderr)
         print(f"{env['db']} and {env['audio_dir']} left unchanged.", file=sys.stderr)

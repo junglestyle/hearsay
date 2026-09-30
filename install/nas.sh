@@ -14,7 +14,7 @@ fi
 
 say "Datasets under $NAS_POOL_DATASET"
 # midclt (not raw zfs) so the TrueNAS UI knows about them.
-for ds in "$NAS_POOL_DATASET" "$NAS_POOL_DATASET/config" "$NAS_POOL_DATASET/raw" "$NAS_POOL_DATASET/db" "$NAS_POOL_DATASET/audio" "$NAS_POOL_DATASET/labels" "$NAS_POOL_DATASET/transcripts" "$NAS_POOL_DATASET/imports"; do
+for ds in "$NAS_POOL_DATASET" "$NAS_POOL_DATASET/config" "$NAS_POOL_DATASET/raw" "$NAS_POOL_DATASET/db" "$NAS_POOL_DATASET/audio" "$NAS_POOL_DATASET/labels" "$NAS_POOL_DATASET/transcripts" "$NAS_POOL_DATASET/imports" "$NAS_POOL_DATASET/stream"; do
     if zfs list -H -o name "$ds" >/dev/null 2>&1; then
         echo "exists: $ds"
     else
@@ -22,14 +22,15 @@ for ds in "$NAS_POOL_DATASET" "$NAS_POOL_DATASET/config" "$NAS_POOL_DATASET/raw"
         echo "created: $ds"
     fi
 done
-[ -d "$NAS_RAW" ] && [ -d "$NAS_CONFIG" ] && [ -d "$NAS_DB" ] && [ -d "$NAS_AUDIO" ] && [ -d "$NAS_LABELS" ] && [ -d "$NAS_TRANSCRIPTS" ] && [ -d "$NAS_IMPORTS" ] || die "datasets not mounted under $NAS_ROOT"
+[ -d "$NAS_RAW" ] && [ -d "$NAS_CONFIG" ] && [ -d "$NAS_DB" ] && [ -d "$NAS_AUDIO" ] && [ -d "$NAS_LABELS" ] && [ -d "$NAS_TRANSCRIPTS" ] && [ -d "$NAS_IMPORTS" ] && [ -d "$NAS_STREAM" ] || die "datasets not mounted under $NAS_ROOT"
 
 chown root:root "$NAS_CONFIG"
 chmod 700 "$NAS_CONFIG"
 chown "$APPS_UID:$APPS_GID" "$NAS_RAW"
 chmod 750 "$NAS_RAW"
-# Parsed transcripts and assembled audio: same sensitivity as raw. Apps group can read them.
-for dir in "$NAS_DB" "$NAS_AUDIO"; do
+# Parsed transcripts, assembled audio and the utterance stream: same
+# sensitivity as raw. The apps group (consumers included) can read them.
+for dir in "$NAS_DB" "$NAS_AUDIO" "$NAS_STREAM"; do
     chown "$APPS_UID:$APPS_GID" "$dir"
     chmod 750 "$dir"
 done
