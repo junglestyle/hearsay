@@ -48,13 +48,17 @@ header in the sidecars records where each request came from.
 
 ## Reprocessing
 
-Rebuild everything derived from raw, on the NAS as root. Conversations are
-found in the audio stream itself (voice detection; a conversation ends after 3
-minutes of silence), not taken from Omi. Transcripts come from
-the dev box, so new audio takes two passes: a reprocess makes the WAVs, the
-dev box's hourly timer transcribes them (or run
-`systemctl --user start hearsay-transcribe` there), and the next reprocess
-turns the transcripts into turns.
+Everything derived from raw is rebuilt hourly at :30 by a TrueNAS cron job
+that `nas.sh` sets up (log: `/mnt/storage/hearsay/logs/reprocess.log`).
+Conversations are found in the audio stream itself (voice detection; a
+conversation ends after 3 minutes of silence), not taken from Omi. Transcripts
+come from the dev box's timer at :00, so new audio flows WAV, then transcript,
+then turns within about an hour, with nothing to run by hand. Each run builds
+a staging copy and swaps it in when done, so readers never see a half-built
+database; slow steps are cached by audio content in `db/cache.sqlite`.
+
+To run it now instead of waiting, on the NAS as root (and on the dev box,
+`systemctl --user start hearsay-transcribe`):
 
 ```sh
 docker compose -f /mnt/storage/hearsay/repo/install/compose.yaml run --rm reprocess

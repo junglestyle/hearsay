@@ -11,11 +11,13 @@ of detected speech, and a 3 min gap never split one of them (1-2 min did),
 though it merges Omi's back-to-back conversations into one.
 """
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
 from hearsay.assemble import SAMPLE_RATE, place_bursts
+from hearsay.cache import Cache, audio_key
 
 # A conversation ends after this long without speech.
 GAP = 180.0
@@ -26,6 +28,8 @@ MIN_SPEECH = 30.0
 PAD = 1.0
 # Bursts closer than this are one continuous run of audio.
 CONTIGUOUS = 0.05
+# Cache key prefix: the detector and settings that produced a cached result.
+VAD_VERSION = "silero-vad-6.2.3:16k:min_silence_500"
 
 SCHEMA = """
 DROP TABLE IF EXISTS conversations;
@@ -51,7 +55,9 @@ def group_speech(speech: list[tuple[float, float]]) -> list[tuple[float, float, 
     return [(s, e, n) for s, e, n in groups if n >= MIN_SPEECH]
 
 
-def detect_speech(raw_dir: Path, bursts: list) -> list[tuple[float, float]]:
+def detect_speech(raw_dir: Path, bursts: list, cache: Cache | None = None) -> list[tuple[float, float]]:
+    """Speech intervals in wall-clock seconds. With a cache, a run of audio seen
+    before (same bytes) is not analyzed again; only new audio costs time."""
     # Imported here: torch is heavy, and only the worker image has it.
     import numpy as np
     import torch
@@ -65,14 +71,22 @@ def detect_speech(raw_dir: Path, bursts: list) -> list[tuple[float, float]]:
         else:
             runs.append([start, end, list(paths)])
 
-    model = load_silero_vad()
+    model = None
     speech = []
     for start, _, paths in runs:
         pcm = b"".join((raw_dir / p).read_bytes() for p in paths)
-        samples = torch.from_numpy(np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768)
-        for s in get_speech_timestamps(samples, model, sampling_rate=SAMPLE_RATE,
-                                       min_silence_duration_ms=500, return_seconds=True):
-            speech.append((start + s["start"], start + s["end"]))
+        key = audio_key(VAD_VERSION, pcm)
+        cached = cache.get(key) if cache else None
+        if cached is not None:
+            found = json.loads(cached)
+        else:
+            model = model or load_silero_vad()
+            samples = torch.from_numpy(np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768)
+            found = [(s["start"], s["end"]) for s in get_speech_timestamps(
+                samples, model, sampling_rate=SAMPLE_RATE, min_silence_duration_ms=500, return_seconds=True)]
+            if cache:
+                cache.put(key, json.dumps(found).encode())
+        speech += [(start + s, start + e) for s, e in found]
     return speech
 
 
@@ -80,11 +94,11 @@ def conversation_id(start: float) -> str:
     return "c" + datetime.fromtimestamp(start, timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def find_conversations(raw_dir: Path, db_path: Path) -> dict:
+def find_conversations(raw_dir: Path, db_path: Path, cache: Cache | None = None) -> dict:
     db = sqlite3.connect(db_path)
     try:
         bursts = place_bursts(db)
-        speech = detect_speech(raw_dir, bursts)
+        speech = detect_speech(raw_dir, bursts, cache)
         stream_end = max((end for _, end, _ in bursts), default=0.0)
         rows = [
             (conversation_id(start), start - PAD, end + PAD, seconds, int(stream_end - end < GAP))

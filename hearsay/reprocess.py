@@ -2,7 +2,13 @@
 audio, turns, speaker labels, people.
 
 Turns come from transcripts the dev box makes of each WAV (hearsay/transcribe.py),
-so new audio needs a reprocess, a transcription run, then another reprocess.
+so new audio takes a reprocess, a transcription run, then another reprocess.
+On the NAS this runs hourly (install/nas.sh), offset from the dev box's timer.
+
+The database is built as a staging copy and swapped in only when every step
+has finished, so the portal and the label tool always read a complete one,
+and a failed run leaves the previous database in place. Slow steps (voice
+detection, speaker embeddings) are cached by audio content next to it.
 """
 
 import os
@@ -10,71 +16,44 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from hearsay.assemble import assemble
+from hearsay import conversations, people, speakers
+from hearsay.assemble import assemble, remove_stale_wavs
+from hearsay.cache import Cache
 from hearsay.conversations import find_conversations
 from hearsay.imports import load_imports
 from hearsay.parse import ParseFailed, rebuild
 from hearsay.people import group_people
-from hearsay import conversations, people, speakers
 from hearsay.speakers import label_speakers
 from hearsay.turns import build_turns, record_operator_input
 
 
-def main() -> None:
-    raw_dir = Path(os.environ["HEARSAY_RAW_DIR"])
-    db_path = Path(os.environ["HEARSAY_DB"])
-    audio_dir = Path(os.environ["HEARSAY_AUDIO_DIR"])
-    labels_dir = Path(os.environ["HEARSAY_LABELS_DIR"])
-    model_dir = Path(os.environ["HEARSAY_MODEL_DIR"])
-    transcripts_dir = Path(os.environ["HEARSAY_TRANSCRIPTS_DIR"])
-    imports_dir = Path(os.environ["HEARSAY_IMPORTS_DIR"])
+def report(title: str, counts: dict) -> None:
+    print(title)
+    for name, n in counts.items():
+        print(f"  {name}: {n}")
+
+
+def run(raw_dir: Path, db_path: Path, audio_dir: Path, labels_dir: Path, model_dir: Path,
+        transcripts_dir: Path, imports_dir: Path) -> None:
+    staging = db_path.with_name(db_path.name + ".building")
+    cache = Cache(db_path.parent / "cache.sqlite")
     try:
-        parsed = rebuild(raw_dir, db_path)
-    except ParseFailed as e:
-        print(e, file=sys.stderr)
-        print(f"{db_path} and {audio_dir} left unchanged.", file=sys.stderr)
-        sys.exit(1)
-    print(f"Rebuilt {db_path} from {raw_dir}:")
-    for name, n in parsed.items():
-        print(f"  {name}: {n}")
-
-    # Decoded imports are derived, so they're cached next to the database.
-    imported = load_imports(imports_dir, db_path, db_path.parent / "imports-pcm")
-    print(f"Imported audio from {imports_dir}:")
-    for name, n in imported.items():
-        print(f"  {name}: {n}")
-
-    found_conversations = find_conversations(raw_dir, db_path)
-    print("Conversations found in the audio stream:")
-    for name, n in found_conversations.items():
-        print(f"  {name}: {n}")
-
-    assembled = assemble(raw_dir, db_path, audio_dir)
-    print(f"Assembled conversation audio in {audio_dir}:")
-    for name, n in assembled.items():
-        print(f"  {name}: {n}")
-
-    found = build_turns(db_path, transcripts_dir)
-    print(f"Turns from transcripts in {transcripts_dir}:")
-    for name, n in found.items():
-        print(f"  {name}: {n}")
-
-    resolved = record_operator_input(db_path, labels_dir)
-    print("Operator labels and names, matched to turns:")
-    for name, n in resolved.items():
-        print(f"  {name}: {n}")
-
-    labeled = label_speakers(raw_dir, db_path, labels_dir, model_dir)
-    print("Speaker embeddings and labels:")
-    for name, n in labeled.items():
-        print(f"  {name}: {n}")
-
-    grouped = group_people(db_path)
-    print("Anonymous speakers and names:")
-    for name, n in grouped.items():
-        print(f"  {name}: {n}")
-
-    record_run(db_path)
+        report(f"Rebuilt from {raw_dir}:", rebuild(raw_dir, staging))
+        # Decoded imports are derived, so they're cached next to the database.
+        report(f"Imported audio from {imports_dir}:",
+               load_imports(imports_dir, staging, db_path.parent / "imports-pcm"))
+        report("Conversations found in the audio stream:", find_conversations(raw_dir, staging, cache))
+        report(f"Assembled conversation audio in {audio_dir}:", assemble(raw_dir, staging, audio_dir))
+        report(f"Turns from transcripts in {transcripts_dir}:", build_turns(staging, transcripts_dir))
+        report("Operator labels and names, matched to turns:", record_operator_input(staging, labels_dir))
+        report("Speaker embeddings and labels:", label_speakers(raw_dir, staging, labels_dir, model_dir, cache))
+        report("Anonymous speakers and names:", group_people(staging))
+        record_run(staging)
+        os.replace(staging, db_path)
+    finally:
+        cache.close()
+        staging.unlink(missing_ok=True)
+    print(f"Replaced {db_path}; removed {remove_stale_wavs(audio_dir, db_path)} stale WAV(s).")
 
 
 def record_run(db_path: Path) -> None:
@@ -96,6 +75,18 @@ def record_run(db_path: Path) -> None:
     finally:
         db.close()
     print(f"Built from commit {info['commit']}.")
+
+
+def main() -> None:
+    env = {name: Path(os.environ[f"HEARSAY_{name.upper()}"]) for name in
+           ("raw_dir", "db", "audio_dir", "labels_dir", "model_dir", "transcripts_dir", "imports_dir")}
+    try:
+        run(env["raw_dir"], env["db"], env["audio_dir"], env["labels_dir"], env["model_dir"],
+            env["transcripts_dir"], env["imports_dir"])
+    except ParseFailed as e:
+        print(e, file=sys.stderr)
+        print(f"{env['db']} and {env['audio_dir']} left unchanged.", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

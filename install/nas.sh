@@ -75,6 +75,31 @@ docker compose -f "$REPO_DIR/install/compose.yaml" up -d
 say "Verifying receiver rejects unauthenticated requests"
 wait_for_401 "http://127.0.0.1:$NAS_RECEIVER_PORT/omi/transcript" 30
 
+say "Hourly reprocess (TrueNAS cron job)"
+# At :30, offset from the dev box's transcription timer at :00, so new audio
+# goes WAV -> transcript -> turns within about an hour. flock skips a run
+# while the previous one is still going. Registered through midclt so it
+# shows in the TrueNAS UI (System -> Advanced -> Cron Jobs) and survives updates.
+mkdir -p "$NAS_LOGS"
+chown "root:$APPS_GID" "$NAS_LOGS"
+chmod 750 "$NAS_LOGS"
+REPROCESS_CMD="(date -Is; flock -n /run/hearsay-reprocess.lock docker compose -f $REPO_DIR/install/compose.yaml run --rm -T reprocess </dev/null) >> $NAS_LOGS/reprocess.log 2>&1"
+cron_payload="$(python3 -c '
+import json, sys
+print(json.dumps({"user": "root", "command": sys.argv[1], "description": "hearsay reprocess",
+                  "schedule": {"minute": "30", "hour": "*", "dom": "*", "month": "*", "dow": "*"},
+                  "enabled": True, "stdout": True, "stderr": True}))' "$REPROCESS_CMD")"
+cron_id="$(midclt call cronjob.query '[["description", "=", "hearsay reprocess"]]' \
+    | python3 -c 'import json, sys; jobs = json.load(sys.stdin); print(jobs[0]["id"] if jobs else "")')"
+if [ -z "$cron_id" ]; then
+    midclt call cronjob.create "$cron_payload" >/dev/null
+    echo "created: hourly reprocess at :30"
+else
+    midclt call cronjob.update "$cron_id" "$cron_payload" >/dev/null
+    echo "up to date: hourly reprocess at :30 (job $cron_id)"
+fi
+echo "log: $NAS_LOGS/reprocess.log"
+
 say "Verifying the portal answers on both addresses"
 for ip in "$HEARSAY_LAN_IP" "$HEARSAY_TAILNET_IP"; do
     wait_for_status GET "http://$ip:$NAS_PORTAL_PORT/login" 200 30

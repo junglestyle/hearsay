@@ -16,6 +16,7 @@ from array import array
 from pathlib import Path
 
 from hearsay.assemble import cut, place_bursts, timestamp
+from hearsay.cache import Cache, audio_key
 
 # Thresholds tuned on 2026-09-27 against 176 ear-labeled Omi segments
 # (`python -m hearsay.label report`). Nearly all misses were under 2.5 s, and
@@ -68,12 +69,25 @@ def load_model(model_dir: Path):
     )
 
 
-def embed(model, pcm: bytes) -> list[float]:
+# Cache key prefix: the speaker model that produced a cached embedding.
+EMBED_VERSION = "ecapa-voxceleb-0f99f2d0"
+
+
+def embed(model, pcm: bytes, cache: Cache | None = None) -> list[float]:
+    """Unit-length embedding; with a cache, audio embedded before isn't embedded again."""
     import torch
 
+    key = audio_key(EMBED_VERSION, pcm)
+    cached = cache.get(key) if cache else None
+    if cached is not None:
+        return list(array("f", cached))
     samples = torch.frombuffer(bytearray(pcm), dtype=torch.int16).float() / 32768.0
     vector = model.encode_batch(samples.unsqueeze(0)).squeeze()
-    return torch.nn.functional.normalize(vector, dim=0).tolist()
+    # Stored as float32 either way, so a cached result equals a fresh one exactly.
+    packed = array("f", torch.nn.functional.normalize(vector, dim=0).tolist())
+    if cache:
+        cache.put(key, packed.tobytes())
+    return list(packed)
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -81,7 +95,8 @@ def cosine(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-def owner_voice(model, raw_dir: Path, bursts: list, labels_dir: Path, db: sqlite3.Connection):
+def owner_voice(model, raw_dir: Path, bursts: list, labels_dir: Path, db: sqlite3.Connection,
+                cache: Cache | None = None):
     """Mean embedding of the enrollment recordings, or None if there are none."""
     path = labels_dir / "enrollment.json"
     if not path.exists():
@@ -94,7 +109,7 @@ def owner_voice(model, raw_dir: Path, bursts: list, labels_dir: Path, db: sqlite
         for k in range(int((end - start) // ENROLLMENT_PIECE)):
             pcm, piece_coverage = cut(raw_dir, bursts, start + k * ENROLLMENT_PIECE, ENROLLMENT_PIECE)
             if piece_coverage >= MIN_COVERAGE:
-                vectors.append(embed(model, pcm))
+                vectors.append(embed(model, pcm, cache))
                 used += 1
         db.execute("INSERT INTO owner_enrollment VALUES (?,?,?,?)", (window["start"], window["end"], coverage, used))
     if not vectors:
@@ -112,13 +127,14 @@ def label_for(similarity: float) -> str | None:
     return None
 
 
-def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Path) -> dict:
+def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Path,
+                   cache: Cache | None = None) -> dict:
     model = load_model(model_dir)
     db = sqlite3.connect(db_path)
     try:
         db.executescript(SCHEMA)
         bursts = place_bursts(db)
-        owner = owner_voice(model, raw_dir, bursts, labels_dir, db)
+        owner = owner_voice(model, raw_dir, bursts, labels_dir, db, cache)
 
         turns = db.execute(
             "SELECT t.turn_id, t.conversation_id, ca.zero_at, t.start, t.end"
@@ -131,7 +147,7 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
             pcm, coverage = cut(raw_dir, bursts, timestamp(zero_at) + start, duration) if duration else (b"", 0.0)
             embedding = similarity = label = None
             if duration >= MIN_TURN and coverage >= MIN_COVERAGE:
-                vector = embed(model, pcm)
+                vector = embed(model, pcm, cache)
                 embedding = array("f", vector).tobytes()
                 counts["embedded"] += 1
                 if owner is not None:

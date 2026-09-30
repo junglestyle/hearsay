@@ -148,10 +148,21 @@ def assemble(raw_dir: Path, db_path: Path, audio_dir: Path) -> dict:
     finally:
         db.close()
 
-    # WAVs are derived: remove any this run didn't produce.
-    current = {r[4] for r in rows if r[4]}
-    for wav in audio_dir.glob("*.wav"):
-        if wav.name not in current:
-            wav.unlink()
+    return {"conversations": len(rows), "with_audio": sum(1 for r in rows if r[4])}
 
-    return {"conversations": len(rows), "with_audio": len(current)}
+
+def remove_stale_wavs(audio_dir: Path, db_path: Path) -> int:
+    """Delete WAVs the database no longer refers to.
+
+    Separate from assemble: reprocess calls it only after the new database is
+    in place, so the one readers see never points at a deleted file.
+    """
+    db = sqlite3.connect(db_path)
+    try:
+        current = {name for (name,) in db.execute("SELECT wav_file FROM conversation_audio WHERE wav_file IS NOT NULL")}
+    finally:
+        db.close()
+    stale = [wav for wav in audio_dir.glob("*.wav") if wav.name not in current]
+    for wav in stale:
+        wav.unlink()
+    return len(stale)

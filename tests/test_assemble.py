@@ -4,7 +4,7 @@ import sqlite3
 import wave
 from datetime import datetime, timedelta, timezone
 
-from hearsay.assemble import assemble
+from hearsay.assemble import assemble, remove_stale_wavs
 from hearsay.conversations import SCHEMA as CONVERSATIONS_SCHEMA
 from hearsay.parse import rebuild
 
@@ -90,6 +90,7 @@ def test_assembles_each_conversation_from_the_stream(tmp_path):
         pcm = w.readframes(w.getnframes())
     per_second = [int.from_bytes(pcm[s * CHUNK : s * CHUNK + 2], "little") for s in range(20)]
     assert per_second == [1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0, 31, 32, 33, 34, 35]
+    assert remove_stale_wavs(audio_dir, db_path) == 1
     assert sorted(p.name for p in audio_dir.iterdir()) == ["c-audio.wav"]
 
     first = (audio_dir / "c-audio.wav").read_bytes()
