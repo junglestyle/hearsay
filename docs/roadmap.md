@@ -95,6 +95,8 @@ Protocol details come from Omi's open-source firmware (MIT).
   decides whether it is dropped at once or kept on the phone only, marked
   paused, for a retention period (30 days to start) during which a paused
   window can be kept (uploaded like normal audio) before it is deleted.
+  A window can be played on the phone and cropped to one selection before
+  upload; the rest of it is deleted.
 - Mute: the pendant's mic gain set to 0, which mutes it in hardware and
   holds out of range and across app crashes until unmuted (which restores
   the previous level).

@@ -71,7 +71,8 @@ counts, and how many uploads are waiting.
 While out of range the pendant records to its own storage; on reconnect the
 app downloads that and uploads it like the rest, and the NAS places it by the
 pendant's clock. Pause keeps audio from reaching the NAS (dropped, or kept on
-the phone for 30 days to upload or delete); if the app was paused at any time
+the phone for 30 days, where a paused stretch can be played, cropped to one
+selection and uploaded, or deleted); if the app was paused at any time
 while the pendant was away, everything it stored then counts as paused. Mute
 turns the pendant's mic off in hardware. The NAS must be updated before the
 app whenever the upload format changes, as the update order above does.

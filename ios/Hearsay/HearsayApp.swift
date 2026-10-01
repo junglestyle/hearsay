@@ -104,7 +104,9 @@ struct StatusView: View {
                 if !pause.windows.isEmpty {
                     Section {
                         ForEach(pause.windows) { window in
-                            Text(describe(window))
+                            NavigationLink(describe(window)) {
+                                WindowView(window: window, pause: pause, uploader: uploader)
+                            }
                                 .swipeActions {
                                     Button("Delete", role: .destructive) { pause.delete(window) }
                                     Button("Upload") {
@@ -116,7 +118,7 @@ struct StatusView: View {
                     } header: {
                         Text("Paused audio on this phone")
                     } footer: {
-                        Text("Swipe to upload or delete.")
+                        Text("Tap to listen and keep a stretch; swipe to upload or delete all of it.")
                     }
                 }
                 Section("Uploads") {

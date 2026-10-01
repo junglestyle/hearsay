@@ -32,16 +32,46 @@ final class Spool {
         noBackup.isExcludedFromBackup = true
         var excluded = dir
         try excluded.setResourceValues(noBackup)
-        // Left over from a previous run: send what it has.
+        // Left over from a previous run: send what it has, and drop a cropped
+        // upload that was never finished (Pause.upload(_:cropped:)).
         seal()
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [] where name.hasSuffix(".part") {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
+        }
+    }
+
+    struct Record {
+        let at: Double
+        let kind: UInt8
+        let data: Data
+
+        var encoded: Data {
+            var out = Data()
+            withUnsafeBytes(of: at.bitPattern.littleEndian) { out.append(contentsOf: $0) }
+            out.append(kind)
+            withUnsafeBytes(of: UInt16(data.count).littleEndian) { out.append(contentsOf: $0) }
+            out.append(data)
+            return out
+        }
+    }
+
+    /// The whole records in a sealed file, in the order they arrived.
+    static func records(in file: URL) throws -> [Record] {
+        let data = try Data(contentsOf: file)
+        var out: [Record] = []
+        var offset = data.startIndex
+        while offset + 11 <= data.endIndex {
+            let at = Double(bitPattern: data[offset..<offset + 8].reversed().reduce(0) { $0 << 8 | UInt64($1) })
+            let length = Int(data[offset + 9]) | Int(data[offset + 10]) << 8
+            guard offset + 11 + length <= data.endIndex else { break }
+            out.append(Record(at: at, kind: data[offset + 8], data: Data(data[offset + 11..<offset + 11 + length])))
+            offset += 11 + length
+        }
+        return out
     }
 
     func append(kind: UInt8, data: Data) {
-        var record = Data()
-        withUnsafeBytes(of: Date().timeIntervalSince1970.bitPattern.littleEndian) { record.append(contentsOf: $0) }
-        record.append(kind)
-        withUnsafeBytes(of: UInt16(data.count).littleEndian) { record.append(contentsOf: $0) }
-        record.append(data)
+        let record = Record(at: Date().timeIntervalSince1970, kind: kind, data: data).encoded
         do {
             if handle == nil {
                 FileManager.default.createFile(atPath: current.path, contents: nil)
@@ -75,14 +105,19 @@ final class Spool {
             try? FileManager.default.removeItem(at: current)
             return
         }
-        let millis = Int64(Date().timeIntervalSince1970 * 1000)
-        let upload = dir.appendingPathComponent("\(millis)-\(UUID().uuidString.lowercased()).upload")
+        let upload = dir.appendingPathComponent(Self.uploadName())
         do {
             try whole.write(to: upload, options: .atomic)
             try FileManager.default.removeItem(at: current)
         } catch {
             log.error("spool seal failed: \(error)")
         }
+    }
+
+    /// <millis>-<uuid>.upload: oldest first when sorted, and the name is the
+    /// upload's idempotency key.
+    static func uploadName() -> String {
+        "\(Int64(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString.lowercased()).upload"
     }
 
     /// Sealed uploads, oldest first.

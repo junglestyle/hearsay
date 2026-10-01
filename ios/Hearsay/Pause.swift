@@ -56,6 +56,7 @@ final class Pause: ObservableObject {
         }
         pendant.route(to: paused ? window : spool)
         pendant.pause = self
+        WindowAudio.removeLeftovers()
         expire()
     }
 
@@ -127,6 +128,28 @@ final class Pause: ObservableObject {
             log.error("keeping paused window \(window.dir.lastPathComponent) failed: \(error)")
         }
         refresh()
+    }
+
+    /// Upload part of a window (WindowAudio.cropped) and delete the rest.
+    /// The parts are written under temporary names and only then queued, so
+    /// a failure leaves the window as it was rather than half of it sent.
+    func upload(_ window: Window, cropped uploads: [Data]) {
+        var parts: [URL] = []
+        do {
+            for upload in uploads {
+                let part = spool.dir.appendingPathComponent(Spool.uploadName() + ".part")
+                try upload.write(to: part, options: .atomic)
+                parts.append(part)
+            }
+        } catch {
+            log.error("cropping paused window \(window.dir.lastPathComponent) failed: \(error)")
+            for part in parts { try? FileManager.default.removeItem(at: part) }
+            return
+        }
+        for part in parts {
+            try? FileManager.default.moveItem(at: part, to: part.deletingPathExtension())
+        }
+        delete(window)
     }
 
     func delete(_ window: Window) {
