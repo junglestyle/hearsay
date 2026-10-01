@@ -15,9 +15,10 @@ written to `/mnt/storage/hearsay/stream/` after every reprocess): one JSONL
 file per conversation plus `index.json`. Each utterance has conversation_id,
 utterance_id, start/end (UTC), speaker {kind, name, label}, text,
 text_confidence (WhisperX word scores) and speaker_confidence {basis,
-owner_similarity}; basis is voice, named, cluster, diarization (the turn
-took its label from its diarized speaker in the conversation, not its own
-voice) or none. Speaker kinds: owner, person (named), anonymous (labeled
+owner_similarity}; basis is voice, named, cluster, channel (in a Mac
+recording, the turn was loud on the mic, so the owner's, or on the call, so
+someone else's), diarization (the turn took its label from its diarized
+speaker in the conversation, not its own voice) or none. Speaker kinds: owner, person (named), anonymous (labeled
 per conversation, e.g. "anon A"), stranger, unknown. `_noise` and `_media`
 turns are left out; other `_` names are categories, not people.
 
@@ -77,8 +78,8 @@ Guarantees consumers rely on (Idea Machine, `docs/ROADMAP.md` §3 there):
 
 Slice 11: Mac audio capture (see the roadmap). A menu-bar app on the
 operator's personal Mac, no pendant: the mic (including AirPods) and system
-audio as separate channels, run/stop from the menu bar, and automatic capture
-during Zoom calls.
+audio as separate channels, run/stop from the menu bar, and a prompt to
+record when a Zoom call starts.
 
 - Uploaded like pendant audio, to the same tailnet-only capture receiver
   (`hearsay/capture.py`); any new record kind is added on the NAS first.
@@ -86,7 +87,9 @@ during Zoom calls.
   call recording wins over the pendant's.
 - Only the operator's personal Mac; a work machine is never used for capture
   or holds audio.
-- Recording calls can require everyone's consent depending on jurisdiction.
+- Recording calls can require everyone's consent depending on jurisdiction,
+  so a call is never recorded without the operator saying yes: the app asks
+  when a call starts and records only on confirmation.
 
 Slice 10 (every turn attributed) is done: turns voice can't judge inherit
 their diarized speaker's label (`hearsay/speakers.py`). Voice labels are
@@ -95,7 +98,7 @@ only.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
 Done when a Zoom call's utterances reach the stream with the owner attributed
-by channel, started automatically. Next: slice 12, retention.
+by channel, recorded after the app's prompt. Next: slice 12, retention.
 
 ## Engineering style
 

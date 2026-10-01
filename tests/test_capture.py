@@ -9,8 +9,10 @@ from datetime import timedelta
 import pytest
 
 from hearsay import capture
-from hearsay.capture import ACTION, AUDIO, BUTTON, CONNECTED, STORED, load_captures
+from hearsay.assemble import cut, place_bursts
+from hearsay.capture import ACTION, AUDIO, BUTTON, CONNECTED, MIC, STORED, SYSTEM, load_captures
 from hearsay.parse import rebuild
+from hearsay.speakers import by_channel, mac_channels
 from test_assemble import T
 
 try:
@@ -22,7 +24,7 @@ pytestmark = pytest.mark.skipif(OPUS is None, reason="libopus not installed")
 FRAME = 320  # codec 21: 20 ms at 16 kHz
 
 
-def opus_frames(n):
+def opus_frames(n, amplitude=8000):
     """n frames of a 440 Hz tone, encoded as the consumer pendant does."""
     OPUS.opus_encoder_create.restype = ctypes.c_void_p
     OPUS.opus_encoder_create.argtypes = [ctypes.c_int32, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
@@ -32,7 +34,7 @@ def opus_frames(n):
     encoder = OPUS.opus_encoder_create(16000, 1, 2051, ctypes.byref(error))  # RESTRICTED_LOWDELAY
     out = []
     for i in range(n):
-        pcm = (ctypes.c_int16 * FRAME)(*(int(8000 * math.sin(2 * math.pi * 440 * (i * FRAME + j) / 16000))
+        pcm = (ctypes.c_int16 * FRAME)(*(int(amplitude * math.sin(2 * math.pi * 440 * (i * FRAME + j) / 16000))
                                           for j in range(FRAME)))
         buf = ctypes.create_string_buffer(160)
         length = OPUS.opus_encode(encoder, pcm, FRAME, buf, 160)
@@ -215,3 +217,38 @@ def test_marks_follow_what_the_app_did_with_each_tap(tmp_path):
     db = sqlite3.connect(db_path)
     assert db.execute("SELECT at, kind FROM marks ORDER BY at").fetchall() == [(t0 + 10, "start"), (t0 + 20, "end")]
     db.close()
+
+
+def test_mac_channels_are_mixed_win_over_the_pendant_and_say_who_spoke(tmp_path):
+    raw, db_path, cache = tmp_path / "raw", tmp_path / "h.sqlite", tmp_path / "capture-pcm"
+    t0 = T.timestamp()
+    tone, quiet = opus_frames(100), opus_frames(100, amplitude=0)
+
+    # A 2 s Mac recording: the owner speaks for the first second (mic), the
+    # call for the next (system). The pendant heard the same 2 s.
+    mac = [record(t0 + i * 0.02, MIC, struct.pack("<H", FRAME) + (tone if i < 50 else quiet)[i]) for i in range(100)]
+    mac += [record(t0 + i * 0.02, SYSTEM, struct.pack("<H", FRAME) + (quiet if i < 50 else tone)[i])
+            for i in range(100)]
+    pendant = [record(t0 - 0.5, CONNECTED, bytes([21]))]
+    pendant += [record(t0 + (i + 1) * 0.02, AUDIO, struct.pack("<HB", i, 0) + tone[i]) for i in range(100)]
+    upload(raw, T + timedelta(seconds=70), "k-mac", b"".join(mac))
+    upload(raw, T + timedelta(seconds=71), "k-pendant", b"".join(pendant))
+    rebuild(raw, db_path)
+    load_captures(raw, db_path, cache)
+
+    db = sqlite3.connect(db_path)
+    rows = {channel: (start, duration, path) for start, duration, channel, path
+            in db.execute("SELECT start, duration, channel, pcm_path FROM mac_audio")}
+    assert set(rows) == {"mic", "system", "mixed"}
+    start, duration, mixed = rows["mixed"]
+    assert start == pytest.approx(t0) and duration == pytest.approx(2.0)
+
+    # The Mac's mix is what the conversation's audio is cut from.
+    pcm, coverage = cut(raw, place_bursts(db), t0, 2.0)
+    assert coverage == 1.0 and pcm == open(mixed, "rb").read()[: len(pcm)]
+
+    channels = mac_channels(db)
+    db.close()
+    assert by_channel(raw, channels, t0 + 0.1, 0.8) == "owner"
+    assert by_channel(raw, channels, t0 + 1.1, 0.8) == "not_owner"
+    assert by_channel(raw, channels, t0 + 5, 1.0) is None  # outside the recording

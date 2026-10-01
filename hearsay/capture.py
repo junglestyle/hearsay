@@ -1,14 +1,16 @@
-"""Audio from our own recorder, placed on the timeline.
+"""Audio from our own recorders, placed on the timeline.
 
-The recorder (the iPhone app, ios/; before it a Mac recorder, removed after
-slice 9, whose uploads are the same format) connects to the Omi pendant over
-BLE and uploads what the pendant sends, verbatim, with the time each
-notification arrived. The
-receiver (create_capture_app) stores each upload in raw/capture/. An upload
-is a sequence of records, little-endian:
+The pendant recorder (the iPhone app, ios/; before it a Mac pendant
+recorder, removed after slice 9, whose uploads are the same format) connects
+to the Omi pendant over BLE and uploads what the pendant sends, verbatim,
+with the time each notification arrived. The Mac recorder (mac/) records the
+Mac's mic and system audio as two channels. The receiver
+(create_capture_app) stores each upload in raw/capture/. An upload is a
+sequence of records, little-endian:
 
-    f64 at      unix seconds on the recorder's clock when it arrived
-    u8  kind    CONNECTED, AUDIO, BUTTON, STORED or ACTION
+    f64 at      unix seconds on the recorder's clock when it arrived (MIC,
+                SYSTEM: when the frame's audio began)
+    u8  kind    CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC or SYSTEM
     u16 length
     bytes       CONNECTED: the codec byte read on connect (19B10002); the
                 iPhone app also writes one on resuming from a pause, since
@@ -20,6 +22,8 @@ is a sequence of records, little-endian:
                 then one 444-byte packet of audio it stored while away
                 ACTION: the button event u8 and what the iPhone app did
                 about it u8 (ACTION_* below), written after the event
+                MIC, SYSTEM: the Mac's samples in the frame u16, then one
+                Opus frame, mono at 16 kHz
 
 An audio notification is [index u16 LE][sub u8][Opus bytes]. index counts
 notifications and wraps at 65535; sub 0 starts a frame, and a frame split
@@ -42,8 +46,15 @@ from the packets before it. The rest stay in raw, unplaced.
 Protocol facts are from Omi's firmware (BasedHardware/omi, MIT):
 omi/firmware/omi/src/lib/core/transport.c, codec.c, button.c.
 
+The Mac's channels are laid end to end from their start times, each channel
+on its own, like the pendant's frames. Where they overlap they are summed
+into one mixed track, which is what conversations and transcripts are made
+from; the channels themselves are kept to tell, per turn, whether the owner
+(mic) or the call (system) was speaking.
+
 Reprocess decodes each run of frames once, to PCM16 mono at 16 kHz, cached by
-the run's content, and records it in captured_audio for place_bursts.
+the run's content, and records it in captured_audio and mac_audio for
+place_bursts.
 """
 
 import ctypes
@@ -55,7 +66,8 @@ from pathlib import Path
 
 from hearsay.assemble import SAMPLE_RATE
 
-CONNECTED, AUDIO, BUTTON, STORED, ACTION = 1, 2, 3, 4, 5
+CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM = 1, 2, 3, 4, 5, 6, 7
+MAC_FRAME = struct.Struct("<H")
 RECORD_HEADER = struct.Struct("<dBH")
 STORED_HEADER = struct.Struct("<BQd")
 STORED_PACKET = 444
@@ -91,6 +103,13 @@ CREATE TABLE captured_audio (
     lost INTEGER NOT NULL,           -- frames lost in transit, concealed
     pcm_path TEXT NOT NULL           -- absolute path of the decoded PCM cache
 );
+DROP TABLE IF EXISTS mac_audio;
+CREATE TABLE mac_audio (
+    start REAL NOT NULL,             -- unix seconds
+    duration REAL NOT NULL,
+    channel TEXT NOT NULL,           -- mic | system | mixed (the two summed)
+    pcm_path TEXT NOT NULL
+);
 """
 
 
@@ -103,7 +122,7 @@ def read_records(body: bytes) -> list[tuple[float, int, bytes]]:
             raise ValueError(f"truncated record header at byte {offset}")
         at, kind, length = RECORD_HEADER.unpack_from(body, offset)
         offset += RECORD_HEADER.size
-        if kind not in (CONNECTED, AUDIO, BUTTON, STORED, ACTION):
+        if kind not in (CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM):
             raise ValueError(f"unknown record kind {kind} at byte {offset}")
         if offset + length > len(body):
             raise ValueError(f"truncated record at byte {offset}")
@@ -265,6 +284,85 @@ def stored_runs(records: list[tuple[float, int, bytes]]) -> tuple[list[tuple[flo
     return out, unplaced
 
 
+def mac_runs(records: list[tuple[float, int, bytes]], channel: int) -> list[tuple[float, list[tuple[int, bytes]]]]:
+    """(start, [(samples, Opus frame)]) per continuous run of one Mac channel.
+
+    The Mac stamps each frame with when its audio began; frames are laid end
+    to end, and one more than REANCHOR from where that puts it starts a run.
+    """
+    out = []
+    end = None
+    for at, kind, data in sorted((r for r in records if r[1] == channel), key=lambda r: r[0]):
+        if len(data) <= MAC_FRAME.size:
+            continue
+        (samples,) = MAC_FRAME.unpack_from(data)
+        if not out or abs(at - end) > REANCHOR:
+            out.append((at, []))
+            end = at
+        out[-1][1].append((samples, data[MAC_FRAME.size :]))
+        end += samples / SAMPLE_RATE
+    return out
+
+
+def decode_mac(opus: ctypes.CDLL, run: list[tuple[int, bytes]]) -> bytes:
+    """PCM for a Mac run, each frame exactly its stated length so the run's
+    timing holds even if a frame doesn't decode."""
+    error = ctypes.c_int()
+    decoder = opus.opus_decoder_create(SAMPLE_RATE, 1, ctypes.byref(error))
+    if error.value:
+        raise RuntimeError(f"opus_decoder_create failed: {error.value}")
+    try:
+        most = 5760  # 120 ms at 48 kHz, the longest Opus frame
+        pcm = (ctypes.c_int16 * most)()
+        out = bytearray()
+        for samples, frame in run:
+            n = opus.opus_decode(decoder, frame, len(frame), pcm, most, 0)
+            if n < 0:
+                # Undecodable: the decoder conceals it from what came before.
+                n = max(0, opus.opus_decode(decoder, None, 0, pcm, min(samples, most), 0))
+            n = min(n, samples)
+            out += ctypes.string_at(pcm, n * 2) + bytes((samples - n) * 2)
+        return bytes(out)
+    finally:
+        opus.opus_decoder_destroy(decoder)
+
+
+def mac_key(channel: int, run: list[tuple[int, bytes]]) -> str:
+    h = hashlib.sha256(b"mac" + bytes([channel]))
+    for samples, frame in run:
+        h.update(MAC_FRAME.pack(samples) + len(frame).to_bytes(2, "little") + frame)
+    return h.hexdigest()
+
+
+def mix(tracks: list[tuple[float, float, str]], cache_dir: Path) -> list[tuple[float, float, str]]:
+    """(start, duration, PCM path) per stretch where Mac tracks overlap or
+    touch, the tracks summed into one."""
+    import numpy as np  # only reprocess mixes; numpy comes with its other dependencies
+
+    groups = []
+    for start, duration, path in sorted(tracks):
+        if groups and start <= groups[-1][1]:
+            groups[-1][1] = max(groups[-1][1], start + duration)
+            groups[-1][2].append((start, path))
+        else:
+            groups.append([start, start + duration, [(start, path)]])
+    out = []
+    for start, end, members in groups:
+        offsets = [(round((s - start) * SAMPLE_RATE), path) for s, path in members]
+        key = hashlib.sha256(repr([(o, Path(p).name) for o, p in offsets]).encode()).hexdigest()
+        path = cache_dir / f"{key}.pcm"
+        if not path.exists():
+            total = np.zeros(round((end - start) * SAMPLE_RATE) + 1, dtype=np.int32)
+            for offset, member in offsets:
+                samples = np.fromfile(member, dtype="<i2")[: len(total) - offset]
+                total[offset : offset + len(samples)] += samples
+            tmp = path.with_name(path.name + ".tmp")
+            np.clip(total, -32768, 32767).astype("<i2").tofile(tmp)
+            tmp.replace(path)
+        out.append((start, end - start, str(path)))
+    return out
+
+
 def load_opus() -> ctypes.CDLL:
     for name in (ctypes.util.find_library("opus"), "libopus.so.0", "/opt/homebrew/lib/libopus.dylib"):
         if not name:
@@ -325,9 +423,10 @@ def load_captures(raw_dir: Path, db_path: Path, cache_dir: Path) -> dict:
         records = [r for records in uploads for r in records]
         stored, unplaced = stored_runs(records)
         found = runs(frames(records)) + stored
+        mac = [(channel, start, run) for channel in (MIC, SYSTEM) for start, run in mac_runs(records, channel)]
 
         cache_dir.mkdir(parents=True, exist_ok=True)
-        opus = load_opus() if found else None
+        opus = load_opus() if found or mac else None
         rows = []
         for start, codec, run in found:
             pcm = cache_dir / f"{run_key(codec, run)}.pcm"
@@ -337,16 +436,29 @@ def load_captures(raw_dir: Path, db_path: Path, cache_dir: Path) -> dict:
                 tmp.replace(pcm)
             rows.append((start, len(run) * FRAME_SAMPLES[codec] / SAMPLE_RATE, len(run),
                          sum(1 for f in run if f is None), str(pcm)))
+        mac_rows = []
+        for channel, start, run in mac:
+            pcm = cache_dir / f"{mac_key(channel, run)}.pcm"
+            if not pcm.exists():
+                tmp = pcm.with_name(pcm.name + ".tmp")
+                tmp.write_bytes(decode_mac(opus, run))
+                tmp.replace(pcm)
+            mac_rows.append((start, sum(n for n, _ in run) / SAMPLE_RATE, "mic" if channel == MIC else "system",
+                             str(pcm)))
+        mac_rows += [(start, duration, "mixed", path)
+                     for start, duration, path in mix([(r[0], r[1], r[3]) for r in mac_rows], cache_dir)]
         # The cache is derived: drop PCM for runs that no longer exist.
-        current = {r[4] for r in rows}
+        current = {r[4] for r in rows} | {r[3] for r in mac_rows}
         for pcm in cache_dir.glob("*.pcm"):
             if str(pcm) not in current:
                 pcm.unlink()
 
         db.executescript(SCHEMA)
         db.executemany("INSERT INTO captured_audio VALUES (?,?,?,?,?)", rows)
+        db.executemany("INSERT INTO mac_audio VALUES (?,?,?,?)", mac_rows)
         db.commit()
     finally:
         db.close()
     return {"uploads": len(paths), "runs": len(rows), "hours": round(sum(r[1] for r in rows) / 3600, 2),
-            "lost_frames": sum(r[3] for r in rows), "stored_runs": len(stored), "stored_unplaced": unplaced}
+            "lost_frames": sum(r[3] for r in rows), "stored_runs": len(stored), "stored_unplaced": unplaced,
+            "mac_hours": round(sum(r[1] for r in mac_rows if r[2] == "mixed") / 3600, 2)}

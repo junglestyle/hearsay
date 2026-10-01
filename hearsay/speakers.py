@@ -12,6 +12,11 @@ diarized speaker in the same conversation, when that speaker's voice-labeled
 turns agree (DIARIZATION_AGREEMENT), unless it inherits not_owner yet
 sounds more like the owner than like that speaker; otherwise it stays
 unlabeled.
+
+Inside a Mac recording the channels say who spoke, which beats voice: a
+turn clearly louder on the mic is the owner's, one clearly louder on the call
+(system audio) isn't, at any length. Turns where both are loud (crosstalk,
+echo from speakers) fall back to voice.
 """
 
 import json
@@ -49,6 +54,10 @@ NOT_OWNER_THRESHOLD = 0.14
 # so a higher bar doesn't help. Vetoing an inherited not_owner turn that
 # sounds more like the owner than like its speaker raised that to 91%.
 DIARIZATION_AGREEMENT = 0.9
+# How much louder (RMS) one Mac channel must be than the other to say who
+# spoke: 12 dB. A guess until checked on real calls; with headphones the
+# quiet channel is near silence, so the margin is mostly for echo.
+CHANNEL_RATIO = 4.0
 
 SCHEMA = """
 DROP TABLE IF EXISTS turn_speakers;
@@ -61,7 +70,7 @@ CREATE TABLE turn_speakers (
     embedding BLOB,                  -- float32 x 192, NULL if too short or too little audio
     owner_similarity REAL,           -- cosine similarity to the enrolled owner voice
     label TEXT,                      -- owner | not_owner | NULL (ambiguous or unknown)
-    basis TEXT                       -- voice | diarization (inherited) | NULL when unlabeled
+    basis TEXT                       -- voice | channel | diarization (inherited) | NULL when unlabeled
 );
 CREATE TABLE owner_enrollment (
     start TEXT NOT NULL,
@@ -142,6 +151,45 @@ def label_for(similarity: float) -> str | None:
     return None
 
 
+def rms(pcm: bytes) -> float:
+    import numpy as np
+
+    samples = np.frombuffer(pcm, dtype="<i2").astype(np.float64)
+    return float(np.sqrt(np.mean(samples ** 2))) if len(samples) else 0.0
+
+
+def channel_label(mic: bytes, system: bytes) -> str | None:
+    """owner when the Mac's mic is clearly louder than the call, not_owner
+    when the call is, None when neither stands out."""
+    m, s = rms(mic), rms(system)
+    if m > CHANNEL_RATIO * s:
+        return "owner"
+    if s > CHANNEL_RATIO * m:
+        return "not_owner"
+    return None
+
+
+def mac_channels(db: sqlite3.Connection) -> dict[str, list]:
+    """Bursts per Mac channel, for cut()."""
+    channels = {"mic": [], "system": []}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name = 'mac_audio'").fetchone():
+        for start, duration, channel, pcm_path in db.execute(
+            "SELECT start, duration, channel, pcm_path FROM mac_audio WHERE channel != 'mixed'"
+        ):
+            channels[channel].append((start, start + duration, [pcm_path]))
+    return channels
+
+
+def by_channel(raw_dir: Path, channels: dict[str, list], start: float, duration: float) -> str | None:
+    if not duration or not channels["mic"]:
+        return None
+    mic, mic_coverage = cut(raw_dir, channels["mic"], start, duration)
+    system, system_coverage = cut(raw_dir, channels["system"], start, duration)
+    if min(mic_coverage, system_coverage) < MIN_COVERAGE:
+        return None
+    return channel_label(mic, system)
+
+
 def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Path,
                    cache: Cache | None = None) -> dict:
     model = load_model(model_dir)
@@ -156,7 +204,8 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
             " FROM turns t JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id"
             " ORDER BY ca.zero_at, t.idx"
         ).fetchall()
-        counts = {"turns": len(turns), "embedded": 0, "owner": 0, "not_owner": 0}
+        channels = mac_channels(db)
+        counts = {"turns": len(turns), "embedded": 0, "owner": 0, "not_owner": 0, "by_channel": 0}
         # Turns too short to label by voice, embedded anyway for the veto in
         # inherit_labels. Kept out of the table: a short turn's embedding is
         # too noisy to label or cluster with.
@@ -164,6 +213,7 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
         for turn_id, conversation_id, zero_at, start, end in turns:
             duration = max(0.0, end - start)
             pcm, coverage = cut(raw_dir, bursts, timestamp(zero_at) + start, duration) if duration else (b"", 0.0)
+            channel = by_channel(raw_dir, channels, timestamp(zero_at) + start, duration)
             embedding = similarity = label = None
             if duration >= MIN_TURN and coverage >= MIN_COVERAGE:
                 vector = embed(model, pcm, cache)
@@ -172,13 +222,17 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
                 if owner is not None:
                     similarity = cosine(vector, owner)
                     label = label_for(similarity)
-                    if label:
-                        counts[label] += 1
-            elif owner is not None and duration >= MIN_EMBED and coverage >= MIN_COVERAGE:
+            elif owner is not None and channel is None and duration >= MIN_EMBED and coverage >= MIN_COVERAGE:
                 short[turn_id] = embed(model, pcm, cache)
+            basis = "voice" if label else None
+            if channel:
+                label, basis = channel, "channel"
+                counts["by_channel"] += 1
+            if label:
+                counts[label] += 1
             db.execute(
                 "INSERT INTO turn_speakers VALUES (?,?,?,?,?,?,?)",
-                (turn_id, conversation_id, coverage, embedding, similarity, label, "voice" if label else None),
+                (turn_id, conversation_id, coverage, embedding, similarity, label, basis),
             )
         counts.update(inherit_labels(db, owner, short))
         db.commit()
@@ -189,7 +243,7 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
 
 
 def inherit_labels(db: sqlite3.Connection, owner: list[float] | None, short: dict[str, list[float]]) -> dict:
-    """Label unlabeled turns from their diarized speaker's voice-labeled turns.
+    """Label unlabeled turns from their diarized speaker's labeled turns (by voice or channel).
 
     Within a conversation the diarizer tells voices apart well, even on turns
     too short to embed reliably; it's the embedding that says whose voice it
@@ -209,7 +263,8 @@ def inherit_labels(db: sqlite3.Connection, owner: list[float] | None, short: dic
         if label:
             by_label = seconds.setdefault((conversation_id, speaker), {})
             by_label[label] = by_label.get(label, 0.0) + duration
-            vectors.setdefault((conversation_id, speaker), []).append(list(array("f", embedding)))
+            if embedding:  # a short turn labeled by channel has none
+                vectors.setdefault((conversation_id, speaker), []).append(list(array("f", embedding)))
     agreed = {}
     for key, by_label in seconds.items():
         label, top = max(by_label.items(), key=lambda item: item[1])
@@ -222,7 +277,7 @@ def inherit_labels(db: sqlite3.Connection, owner: list[float] | None, short: dic
         if label or (c, s) not in agreed:
             continue
         vector = short.get(turn_id) or (list(array("f", embedding)) if embedding else None)
-        if agreed[(c, s)] == "not_owner" and owner is not None and vector is not None \
+        if agreed[(c, s)] == "not_owner" and owner is not None and vector is not None and (c, s) in centroids \
                 and cosine(vector, owner) > cosine(vector, centroids[(c, s)]):
             vetoed += 1
             continue

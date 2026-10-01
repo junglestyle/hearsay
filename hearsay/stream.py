@@ -53,11 +53,12 @@ def speaker_kind(label: str | None, person: str | None, basis: str | None) -> tu
 
     A turn labeled by its diarized speaker rather than its own voice
     (hearsay/speakers.py) says so: its basis is "diarization", whatever the
-    kind.
+    kind. Likewise "channel" for one labeled by which channel of a Mac
+    recording it was loud on.
     """
     found = speaker_from_label(label, person)
-    if found and basis == "diarization":
-        return found[0], found[1], "diarization"
+    if found and basis in ("diarization", "channel"):
+        return found[0], found[1], basis
     return found
 
 

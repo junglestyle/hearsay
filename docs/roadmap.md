@@ -148,13 +148,14 @@ than the first 155.
 
 A menu-bar app on the operator's personal Mac (no pendant) that captures the
 mic (including AirPods) and system audio as separate channels: run/stop from
-the menu bar, and automatic capture during Zoom calls. Uploaded like pendant
+the menu bar, and a prompt to record when a Zoom call starts. Uploaded like pendant
 audio. Speech on the mic channel is the owner's, by channel; during a call
 the call recording wins over the pendant's. Recording calls can require
-everyone's consent depending on jurisdiction.
+everyone's consent depending on jurisdiction, so the app asks rather than
+starting on its own: a call is recorded only once the operator says yes.
 
 Done when: a Zoom call's utterances reach the stream with the owner
-attributed by channel, started automatically.
+attributed by channel, recorded after the app's prompt.
 
 ## 12. Retention
 

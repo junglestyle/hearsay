@@ -22,7 +22,7 @@ CLUSTER_THRESHOLD = 0.40
 
 SCHEMA = """
 DROP TABLE IF EXISTS turn_people;
--- One row per turn labeled not_owner, by voice or inherited by diarization.
+-- One row per turn labeled not_owner, by voice, by channel or inherited by diarization.
 CREATE TABLE turn_people (
     turn_id TEXT PRIMARY KEY REFERENCES turns(turn_id),
     cluster TEXT NOT NULL,           -- smallest turn_id in the cluster; changes as data grows
@@ -73,11 +73,13 @@ def group_people(db_path: Path) -> dict:
     db = sqlite3.connect(db_path)
     try:
         names = dict(db.execute("SELECT turn_id, value FROM operator_input WHERE kind = 'name'"))
-        # Only turns labeled not_owner by voice: the owner's voice never joins
-        # a cluster, even when diarization lumps it in with someone else's.
+        # Only turns labeled not_owner by voice or by a Mac recording's
+        # channel: the owner's voice never joins a cluster, even when
+        # diarization lumps it in with someone else's.
         rows = db.execute(
             "SELECT ts.turn_id, t.conversation_id, t.diar_speaker, ts.embedding FROM turn_speakers ts"
-            " JOIN turns t ON t.turn_id = ts.turn_id WHERE ts.label = 'not_owner' AND ts.basis = 'voice'"
+            " JOIN turns t ON t.turn_id = ts.turn_id WHERE ts.label = 'not_owner'"
+            " AND ts.basis IN ('voice', 'channel') AND ts.embedding IS NOT NULL"
             " ORDER BY ts.turn_id"
         ).fetchall()
         speakers, vectors = speaker_vectors(rows)
@@ -88,14 +90,16 @@ def group_people(db_path: Path) -> dict:
         for turn_ids, c in zip(speakers, cluster(vectors)):
             members.setdefault(c, []).extend(turn_ids)
             speaker_cluster.setdefault(diarized[turn_ids[0]], c)
-        # Names come from voice-labeled turns only: a tag's time span can catch
-        # a short inherited turn the diarizer put under someone else.
+        # Names come from the clustered turns only: a tag's time span can
+        # catch a short inherited turn the diarizer put under someone else.
         named_by = {c: list(turn_ids) for c, turn_ids in members.items()}
-        # Turns that inherited not_owner from their diarized speaker join that
+        # Turns that inherited not_owner from their diarized speaker, and
+        # those labeled by channel but too short to embed, join that
         # speaker's cluster, and so its name.
         for turn_id, conversation_id, diar_speaker in db.execute(
             "SELECT ts.turn_id, t.conversation_id, t.diar_speaker FROM turn_speakers ts"
-            " JOIN turns t ON t.turn_id = ts.turn_id WHERE ts.label = 'not_owner' AND ts.basis = 'diarization'"
+            " JOIN turns t ON t.turn_id = ts.turn_id WHERE ts.label = 'not_owner'"
+            " AND (ts.basis = 'diarization' OR (ts.basis = 'channel' AND ts.embedding IS NULL))"
         ):
             c = speaker_cluster.get((conversation_id, diar_speaker))
             if c is not None:

@@ -53,6 +53,9 @@ def place_bursts(db: sqlite3.Connection) -> list[tuple[float, float, list[str]]]
     wherever the two overlap. Our recorder's audio (hearsay/capture.py) comes
     next, one burst per run, then Omi's webhook audio. The recorder and Omi's
     app can't both be connected to the pendant, so those two never overlap.
+    The Mac's recordings (its two channels mixed) come last: the owner chose
+    to record them, so they win over the pendant wherever both heard the same
+    thing.
     """
     rows = db.execute(
         "SELECT p.path, p.received_at, p.body_bytes, a.sample_rate FROM audio_chunks a"
@@ -90,6 +93,11 @@ def place_bursts(db: sqlite3.Connection) -> list[tuple[float, float, list[str]]]
             position = by_receipt
         placed.append((position, position + duration, paths))
         position += duration
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name = 'mac_audio'").fetchone():
+        for start, duration, pcm_path in db.execute(
+            "SELECT start, duration, pcm_path FROM mac_audio WHERE channel = 'mixed' ORDER BY start"
+        ):
+            placed.append((start, start + duration, [pcm_path]))
     return placed
 
 
