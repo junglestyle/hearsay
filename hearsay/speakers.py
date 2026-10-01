@@ -30,6 +30,9 @@ from hearsay.cache import Cache, audio_key
 # lowest value tested, for margin. Re-check them on WhisperX turns, whose
 # boundaries differ from Omi's.
 MIN_TURN = 2.5
+# The speaker model fails on clips under 40 ms (its padding outgrows the
+# input), so shorter turns aren't embedded even for the veto.
+MIN_EMBED = 0.1
 # Fraction of a turn that must be received audio, not filled silence.
 MIN_COVERAGE = 0.8
 # Enrollment audio is embedded in pieces this long, then averaged.
@@ -171,7 +174,7 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
                     label = label_for(similarity)
                     if label:
                         counts[label] += 1
-            elif duration > 0 and coverage >= MIN_COVERAGE:
+            elif owner is not None and duration >= MIN_EMBED and coverage >= MIN_COVERAGE:
                 short[turn_id] = embed(model, pcm, cache)
             db.execute(
                 "INSERT INTO turn_speakers VALUES (?,?,?,?,?,?,?)",
