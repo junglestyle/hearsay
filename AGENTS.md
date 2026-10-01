@@ -49,16 +49,22 @@ Downstream consumers read this. They never receive audio.
 
 ## Current slice
 
-Slice 9: own capture. A Mac recorder (`capture/`, Swift) connects to the
-Omi pendant over BLE and uploads what it sends, verbatim and timestamped on
-arrival, to the capture receiver on the NAS (tailnet only). Reprocess
-decodes it (`hearsay/capture.py`) onto the same timeline as Omi's webhook
-audio. A single tap on the pendant keeps nearby speech as a conversation
-however short it is. Next in this slice: downloading what the pendant
-stored while out of range, then the iPhone app.
+Slice 9: the iPhone pendant app (see the roadmap for the feature list). The
+Mac pendant recorder (`capture/`, Swift) proved the BLE protocol, the
+verbatim timestamped spool, the upload to the tailnet-only capture receiver
+and the decode in reprocess (`hearsay/capture.py`); it is retired as a
+product and is the starting point for the iPhone app's code. The pendant
+connects to one device at a time, so it belongs to the phone.
+
+- Paused audio never reaches the NAS: dropped, or kept on the phone only for
+  a retention period (a switch), so raw stays never-deleted.
+- Server URL and token are settings, never hardwired.
+- iOS builds happen on the operator's Mac (Xcode); a work machine is never
+  used for capture or holds audio.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when a day of capture reaches Hearsay with Omi's cloud out of the loop.
+Done when a day of capture reaches Hearsay from the phone with Omi's cloud
+out of the loop, including a stretch out of range and a paused stretch.
 
 ## Engineering style
 

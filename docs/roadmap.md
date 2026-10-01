@@ -79,28 +79,47 @@ from, and conversation ids change with slice 7.
 Done when: a downstream consumer reads utterances without touching audio
 or Hearsay's internals.
 
-## 9. Own capture app
+## 9. iPhone pendant app
 
-Pendant over BLE, straight to Hearsay over the tailnet. No Omi cloud, no
-upsells. Replaces the webhook path. Protocol details come from Omi's
-open-source firmware and apps (check the license of anything reused).
-Pressing the pendant's button marks a short self-note, which is kept even
-when it's shorter than a conversation.
+A pared-down replacement for Omi's app: pendant over BLE, straight to
+Hearsay's capture receiver over the tailnet. No Omi cloud, no upsells.
+Replaces the webhook path. Native Swift, starting from the Mac pendant
+recorder (`capture/`), which proved the protocol, the spool and the upload
+format and is now retired as a product (the pendant belongs to the phone).
+Protocol details come from Omi's open-source firmware (MIT).
 
-A Mac recorder comes first, to prove the protocol, the upload and the
-stored format. The iPhone app follows and reuses both.
+- Nothing lost offline: the phone spools everything verbatim with arrival
+  times and uploads whenever the NAS is reachable; audio the pendant stored
+  while the phone was out of range is downloaded from it afterwards.
+- Pause/resume monitoring. Paused audio never reaches the NAS. A switch
+  decides whether it is dropped at once or kept on the phone only, marked
+  paused, for a retention period (30 days to start) during which a paused
+  window can be kept (uploaded like normal audio) before it is deleted.
+- Optional conversation markers: start (keep what follows even if short,
+  e.g. self-notes) and end (force a split).
+- Configurable actions for the pendant's single tap, double tap and long
+  press, each with its own haptic pattern. The firmware's haptic
+  characteristic plays 100/300/500 ms buzzes; patterns are sequences of them.
+- Server URL and token are settings, not hardwired, so the app isn't tied to
+  one Hearsay install.
+- Signing: a free Apple ID while building (installs expire after 7 days),
+  the paid developer program once it's in daily use. Personal installs need
+  no App Review; publishing is a separate decision for later.
 
-Done when: a day of capture reaches Hearsay with Omi's cloud out of the
-loop.
+Done when: a day of capture reaches Hearsay from the phone with Omi's cloud
+out of the loop, including a stretch out of range and a paused stretch.
 
-## 10. Zoom calls on the Mac
+## 10. Mac audio capture
 
-Record calls on the Mac: the owner's mic and the call's audio as separate
-channels, uploaded the same way as pendant audio. During a call, the call
-recording wins over the pendant's, and mic-channel speech is the owner's.
+A menu-bar app on the operator's personal Mac (no pendant) that captures the
+mic (including AirPods) and system audio as separate channels: run/stop from
+the menu bar, and automatic capture during Zoom calls. Uploaded like pendant
+audio. Speech on the mic channel is the owner's, by channel; during a call
+the call recording wins over the pendant's. Recording calls can require
+everyone's consent depending on jurisdiction.
 
 Done when: a Zoom call's utterances reach the stream with the owner
-attributed by channel.
+attributed by channel, started automatically.
 
 ## 11. Retention
 
