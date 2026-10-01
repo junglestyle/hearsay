@@ -13,6 +13,10 @@ final class Spool {
     static let connected: UInt8 = 1
     static let audio: UInt8 = 2
     static let button: UInt8 = 3
+    /// Audio the pendant stored while away: codec u8, the pendant's
+    /// sequence number u64 LE, start of the away stretch f64 LE (0 unknown),
+    /// then the stored packet as the pendant keeps it.
+    static let stored: UInt8 = 4
 
     let dir: URL
     private let current: URL

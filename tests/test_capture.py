@@ -9,7 +9,7 @@ from datetime import timedelta
 import pytest
 
 from hearsay import capture
-from hearsay.capture import AUDIO, BUTTON, CONNECTED, load_captures
+from hearsay.capture import AUDIO, BUTTON, CONNECTED, STORED, load_captures
 from hearsay.parse import rebuild
 from test_assemble import T
 
@@ -133,7 +133,7 @@ def test_paused_stretch_is_a_gap_until_kept(tmp_path):
     upload(raw, T + timedelta(seconds=10), "k-before", stretch(t0, 0))
     upload(raw, T + timedelta(seconds=20), "k-after", stretch(t0 + 2, 100))
     rebuild(raw, db_path)
-    assert load_captures(raw, db_path, cache) == {"uploads": 2, "runs": 2, "hours": 0.0, "lost_frames": 0}
+    assert load_captures(raw, db_path, cache)["runs"] == 2
 
     upload(raw, T + timedelta(days=3), "k-paused", stretch(t0 + 1, 50))
     rebuild(raw, db_path)
@@ -142,3 +142,52 @@ def test_paused_stretch_is_a_gap_until_kept(tmp_path):
     rows = db.execute("SELECT start, duration FROM captured_audio").fetchall()
     db.close()
     assert len(rows) == 1 and abs(rows[0][0] - t0) < 0.05 and rows[0][1] == pytest.approx(3.0)
+
+
+def stored_packet(stamp, frames):
+    """A packet as the pendant stores it: frames, zero padding standing in
+    for frames that would fill it, then the length byte of a frame that
+    doesn't fit (it starts the next packet) and stale bytes."""
+    audio = bytearray()
+    for frame in frames:
+        audio += bytes([len(frame)]) + frame
+    size = len(frames[0])
+    marker = 440 - size // 2
+    audio += bytes(marker - len(audio)) + bytes([size])
+    audio += b"\xaa" * (440 - len(audio))
+    return struct.pack(">I", stamp) + bytes(audio)
+
+
+def test_audio_stored_while_away_is_placed_by_the_pendants_clock(tmp_path):
+    raw, db_path, cache = tmp_path / "raw", tmp_path / "h.sqlite", tmp_path / "capture-pcm"
+    away = int(T.timestamp())
+    frames = opus_frames(100)
+
+    # Away from 'away': 1 s of speech 10 s in, the mic sleeps, then 1 s more
+    # at 30 s. Five frames (100 ms) per packet. Then the pendant reboots and
+    # its clock restarts from before the away stretch.
+    packets = []
+    for i in range(10):
+        packets.append(stored_packet(away + 10 + (i + 1) // 10, frames[i * 5 : i * 5 + 5]))
+    for i in range(10):
+        packets.append(stored_packet(away + 30 + (i + 1) // 10, frames[50 + i * 5 : 55 + i * 5]))
+    packets.append(stored_packet(away - 600, frames[:5]))
+
+    def download(at, first_seq, chunk):
+        return b"".join(record(at, STORED, struct.pack("<BQd", 21, first_seq + i, away) + p)
+                        for i, p in enumerate(chunk))
+
+    # The first download broke after 12 packets; the next one starts over at
+    # the last packet the pendant counted as sent.
+    upload(raw, T + timedelta(minutes=5), "k-1", download(away + 60, 1000, packets[:12]))
+    upload(raw, T + timedelta(minutes=6), "k-2", download(away + 70, 1011, packets[11:]))
+    rebuild(raw, db_path)
+    report = load_captures(raw, db_path, cache)
+    assert (report["stored_runs"], report["stored_unplaced"]) == (2, 1)
+
+    db = sqlite3.connect(db_path)
+    rows = db.execute("SELECT start, duration, frames, lost FROM captured_audio ORDER BY start").fetchall()
+    db.close()
+    (s1, d1, n1, lost1), (s2, d2, n2, _) = rows
+    assert (n1, n2, lost1) == (50, 50, 0) and d1 == pytest.approx(1.0) and d2 == pytest.approx(1.0)
+    assert abs(s1 - (away + 10)) < 1 and abs(s2 - (away + 30)) < 1

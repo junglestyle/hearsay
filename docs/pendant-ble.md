@@ -83,8 +83,10 @@ Battery level: the standard Battery Service (`0x180F`, level `0x2A19`).
 
 Service `30295780-4301-EABD-2904-2849ADFEAE43`.
 
-- `30295781-…` control (write commands; notify for acks and info).
-- `30295782-…` data (read/notify).
+- `30295781-…` control: write commands; **every** notification comes here,
+  bulk data included.
+- `30295782-…` status (read): four u32 LE, used bytes, unread packets, free
+  bytes, clock valid.
 
 The pendant keeps a ring buffer of audio packets addressed by sequence
 number. Commands (first byte; integers big-endian):
@@ -92,22 +94,42 @@ number. Commands (first byte; integers big-endian):
 | Command | Bytes | Meaning |
 |---|---|---|
 | `0x10` ring info | 1 | ask what the ring holds (answered with an info notification) |
-| `0x11` ring read | 9 or 13: seq (u64), optional count (u32) | stream packets from seq |
+| `0x11` ring read | 9 or 13: seq (u64), optional count (u32) | stream packets from seq (all, without a count) |
 | `0x12` ring advance | 9: seq (u64) | mark everything before seq as received, freeing it |
 | `0x13` ring clear | 1 | discard the ring |
 | `0x03` stop | 1 | stop a transfer |
 
-Notifications on the control characteristic start with a type: `0x01` ack,
-`0x02` info, `0x03` data, `0x04` done, `0x05` read begin. Error codes in acks
-include 6 invalid command, 9 storage not ready (the SD card remounts for up to
-about 5 s after a connection), 10 sequence out of range. For the exact layout
-of the info and data notifications, read `lib/core/storage.c`
-(`send_ring_info_response`, the data path) at the commit above.
+Notifications start with a type:
 
-For Hearsay: read, spool exactly as received along with whatever timing the
-pendant provides (check how the data notifications place packets in time;
-receipt time on the phone is not when the audio was recorded), then advance
-only once the spool has it, so nothing is lost if the transfer breaks.
+| Type | Rest |
+|---|---|
+| `0x01` ack | status u8; errors include 6 invalid command, 9 storage not ready (the SD card remounts for up to about 5 s after a connection; the pendant waits that long before answering), 10 sequence out of range |
+| `0x02` info | read seq u64, write seq u64, capacity u32, dropped u64, packet size u16 (444) |
+| `0x05` read begin | start seq u64, packet count u32 |
+| `0x03` data | the next bytes of the packet stream, cut at the MTU without regard to packet boundaries |
+| `0x04` done | status u8, next seq u64 |
+
+A packet is 444 bytes: the pendant's UTC time in whole seconds (u32 BE), taken
+when the packet filled, then 440 bytes of `[len u8][Opus frame]...`. Zero is
+padding. When a frame doesn't fit, the firmware writes its length byte with
+no frame (the frame starts the next packet) and leaves stale bytes after it,
+so a frame that would reach the end ends the packet. The codec is the live
+one (`19B10002`).
+
+Behaviour that matters (`storage.c`, `sd_card.c`, `transport.c`, `rtc.c`):
+
+- Audio is stored only while no phone is connected, and only while the
+  pendant's clock is valid. While connected but not subscribed to audio, it
+  is thrown away, not stored.
+- The pendant frees packets as their notifications finish sending (every 2 s,
+  and at done or disconnect); the advance command isn't needed. So the phone
+  must spool on arrival: there's no second copy.
+- After an unclean reboot the clock restarts from the last time a phone set
+  it, so timestamps can run early until the next connect sets it again.
+
+Hearsay's app (`ios/Hearsay/Pendant.swift`) asks for info on every connect,
+reads everything, cuts the stream into packets and spools each one;
+`hearsay/capture.py` places them.
 
 ## Not needed for now
 

@@ -74,6 +74,9 @@ struct StatusView: View {
                     if !pendant.lastMinute.isEmpty {
                         Text("Last minute: \(pendant.lastMinute)")
                     }
+                    if !pendant.stored.isEmpty {
+                        Text("Stored while away: \(pendant.stored)")
+                    }
                     Button("Use a different pendant", role: .destructive) { confirmForget = true }
                         .confirmationDialog("Forget this pendant and connect to the next one found?",
                                             isPresented: $confirmForget, titleVisibility: .visible) {

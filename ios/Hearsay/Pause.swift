@@ -8,13 +8,19 @@ import Foundation
 ///
 /// A window is its own Spool under paused/<start millis>/, so its files are
 /// already uploads: keeping one moves them into the upload spool, and the NAS
-/// places them by their own arrival times. Windows not kept are deleted
-/// `retention` after they end.
+/// places them by their own times. Windows not kept are deleted `retention`
+/// after they end.
+///
+/// Audio the pendant stored while away is downloaded on reconnect. If the
+/// app was paused at any time while the pendant was away, all of it is
+/// treated as paused: only the pendant's clock could split it, and that
+/// clock can be wrong.
 final class Pause: ObservableObject {
     static let retention: TimeInterval = 30 * 86400
     private static let pausedKey = "paused"
     private static let keepKey = "keepPaused"
     private static let windowKey = "pausedWindow"
+    private static let resumedAtKey = "resumedAt"
 
     struct Window: Identifiable {
         let dir: URL
@@ -29,7 +35,10 @@ final class Pause: ObservableObject {
     /// Finished windows, oldest first; the one being recorded isn't listed.
     @Published private(set) var windows: [Window] = []
 
+    /// Where paused audio is kept right now: while paused, or while a
+    /// download that counts as paused is running.
     private(set) var window: Spool?
+    private var downloadPaused = false
     private let root: URL
     private let spool: Spool
     private let pendant: Pendant
@@ -46,6 +55,7 @@ final class Pause: ObservableObject {
             window = openWindow(name)
         }
         pendant.route(to: paused ? window : spool)
+        pendant.pause = self
         expire()
     }
 
@@ -54,7 +64,7 @@ final class Pause: ObservableObject {
         paused = true
         UserDefaults.standard.set(true, forKey: Self.pausedKey)
         spool.seal()
-        if keep { window = openWindow(Self.newWindowName()) }
+        if keep && window == nil { window = openWindow(Self.newWindowName()) }
         pendant.route(to: window)
         log.info("paused, \(self.keep ? "keeping on the phone" : "dropping")")
     }
@@ -63,7 +73,8 @@ final class Pause: ObservableObject {
         guard paused else { return }
         paused = false
         UserDefaults.standard.set(false, forKey: Self.pausedKey)
-        endWindow()
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.resumedAtKey)
+        if !downloadPaused { endWindow() }
         pendant.route(to: spool)
         log.info("resumed")
     }
@@ -79,6 +90,30 @@ final class Pause: ObservableObject {
             endWindow()
         }
         pendant.route(to: window)
+    }
+
+    /// A download of stored audio is starting; `awaySince` is when the
+    /// pendant left (nil if unknown).
+    func beginDownload(awaySince: Date?) {
+        let resumedAt = UserDefaults.standard.object(forKey: Self.resumedAtKey) as? Double
+        var resumedWhileAway = false
+        if let awaySince, let resumedAt { resumedWhileAway = resumedAt >= awaySince.timeIntervalSince1970 }
+        downloadPaused = paused || resumedWhileAway
+        if downloadPaused { log.info("paused while the pendant was away: its stored audio counts as paused") }
+    }
+
+    /// Where the download's audio goes; nil drops it. Asked per packet, so
+    /// pausing mid-download takes effect at once.
+    var storedTarget: Spool? {
+        guard paused || downloadPaused else { return spool }
+        guard keep else { return nil }
+        if window == nil { window = openWindow(Self.newWindowName()) }
+        return window
+    }
+
+    func endDownload() {
+        downloadPaused = false
+        if !paused && window != nil { endWindow() }
     }
 
     /// Upload a window like normal audio.

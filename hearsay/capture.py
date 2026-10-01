@@ -6,13 +6,16 @@ receiver (create_capture_app) stores each upload in raw/capture/. An upload
 is a sequence of records, little-endian:
 
     f64 at      unix seconds on the recorder's clock when it arrived
-    u8  kind    CONNECTED, AUDIO or BUTTON
+    u8  kind    CONNECTED, AUDIO, BUTTON or STORED
     u16 length
     bytes       CONNECTED: the codec byte read on connect (19B10002); the
                 iPhone app also writes one on resuming from a pause, since
                 the index jumps over audio that went elsewhere
                 AUDIO: one notification from 19B10001, header included
                 BUTTON: one notification from 23BA7925
+                STORED: codec u8, the pendant's sequence number u64,
+                start of the pendant's away stretch f64 (0 if unknown),
+                then one 444-byte packet of audio it stored while away
 
 An audio notification is [index u16 LE][sub u8][Opus bytes]. index counts
 notifications and wraps at 65535; sub 0 starts a frame, and a frame split
@@ -22,6 +25,15 @@ own, and the pendant's mic sleeps after 10 s of silence without saying so, so
 frames are timed by arrival: laid end to end, and started afresh when a
 frame arrives more than REANCHOR away from where that puts it.
 Frames lost in transit (a gap in index) are filled by Opus loss concealment.
+
+The pendant stores audio only while no phone is connected, and the iPhone app
+downloads it on reconnect. A stored packet is [time u32 BE][440 bytes of
+[len u8][Opus frame]...], the time being the pendant's clock, in whole
+seconds, when the packet filled, so about when its last frame ended. Packets
+are placed by that clock, which after an unclean reboot restarts from the
+last time a phone set it: a packet is placed only if its time is within the
+away stretch (after it began, before the download) and doesn't step back
+from the packets before it. The rest stay in raw, unplaced.
 
 Protocol facts are from Omi's firmware (BasedHardware/omi, MIT):
 omi/firmware/omi/src/lib/core/transport.c, codec.c, button.c.
@@ -39,8 +51,11 @@ from pathlib import Path
 
 from hearsay.assemble import SAMPLE_RATE
 
-CONNECTED, AUDIO, BUTTON = 1, 2, 3
+CONNECTED, AUDIO, BUTTON, STORED = 1, 2, 3, 4
 RECORD_HEADER = struct.Struct("<dBH")
+STORED_HEADER = struct.Struct("<BQd")
+STORED_PACKET = 444
+STORED_AUDIO = 440
 
 # Codec byte -> samples per Opus frame. 21 is the consumer pendant, 20 the
 # DevKit; the firmware builds nothing else.
@@ -53,6 +68,10 @@ SINGLE_TAP = 1
 # A frame arriving this far from where end-to-end placement puts it starts a
 # new run: the mic slept, or the link dropped.
 REANCHOR = 1.0
+
+# Stored packets carry whole seconds, so their slack is wider.
+STORED_REANCHOR = 2.0
+CLOCK_SLACK = 2.0
 
 SCHEMA = """
 DROP TABLE IF EXISTS captured_audio;
@@ -75,7 +94,7 @@ def read_records(body: bytes) -> list[tuple[float, int, bytes]]:
             raise ValueError(f"truncated record header at byte {offset}")
         at, kind, length = RECORD_HEADER.unpack_from(body, offset)
         offset += RECORD_HEADER.size
-        if kind not in (CONNECTED, AUDIO, BUTTON):
+        if kind not in (CONNECTED, AUDIO, BUTTON, STORED):
             raise ValueError(f"unknown record kind {kind} at byte {offset}")
         if offset + length > len(body):
             raise ValueError(f"truncated record at byte {offset}")
@@ -161,6 +180,68 @@ def runs(frame_list: list[tuple[float, int, bytes | None]]) -> list[tuple[float,
     return out
 
 
+def stored_frames(audio: bytes) -> list[bytes]:
+    """Opus frames from a stored packet's 440 bytes.
+
+    0 is padding. When a frame doesn't fit, the firmware writes its length
+    byte without the frame (which starts the next packet) and leaves stale
+    bytes after it, so a frame running to the end or past it ends the packet.
+    """
+    out = []
+    offset = 0
+    while offset < len(audio) - 1:
+        size = audio[offset]
+        if size == 0:
+            offset += 1
+            continue
+        if offset + 1 + size >= len(audio):
+            break
+        out.append(audio[offset + 1 : offset + 1 + size])
+        offset += 1 + size
+    return out
+
+
+def stored_runs(records: list[tuple[float, int, bytes]]) -> tuple[list[tuple[float, int, list[bytes | None]]], int]:
+    """(runs as runs() gives them, packets left unplaced) from STORED records.
+
+    A packet downloaded twice (a transfer broken and resumed) is kept once.
+    Packets go in the pendant's order; each one's frames end about half a
+    second after its whole-second time, and a run is laid end to end until a
+    packet lands more than STORED_REANCHOR away.
+    """
+    packets = {}
+    for at, kind, data in records:
+        if kind != STORED or len(data) != STORED_HEADER.size + STORED_PACKET:
+            continue
+        codec, seq, away_since = STORED_HEADER.unpack_from(data)
+        packet = data[STORED_HEADER.size :]
+        packets.setdefault((seq, packet), (at, codec, away_since))
+
+    out = []
+    unplaced = 0
+    end = None
+    latest = None  # the pendant's time on the packet before, if placed
+    for (seq, packet), (at, codec, away_since) in sorted(packets.items(), key=lambda p: p[0][0]):
+        if codec not in FRAME_SAMPLES:
+            unplaced += 1
+            continue
+        stamp = int.from_bytes(packet[:4], "big") + 0.5
+        if stamp < away_since - CLOCK_SLACK or stamp > at + CLOCK_SLACK or (latest and stamp < latest - CLOCK_SLACK):
+            unplaced += 1
+            continue
+        latest = max(latest or stamp, stamp)
+        frame_list = stored_frames(packet[4:])
+        if not frame_list:
+            continue
+        duration = len(frame_list) * FRAME_SAMPLES[codec] / SAMPLE_RATE
+        if not out or out[-1][1] != codec or abs(stamp - (end + duration)) > STORED_REANCHOR:
+            out.append((stamp - duration, codec, []))
+            end = stamp - duration
+        out[-1][2].extend(frame_list)
+        end += duration
+    return out, unplaced
+
+
 def load_opus() -> ctypes.CDLL:
     for name in (ctypes.util.find_library("opus"), "libopus.so.0", "/opt/homebrew/lib/libopus.dylib"):
         if not name:
@@ -218,7 +299,9 @@ def load_captures(raw_dir: Path, db_path: Path, cache_dir: Path) -> dict:
         # order by their first record.
         uploads = [read_records((raw_dir / path).read_bytes()) for path in paths]
         uploads.sort(key=lambda records: records[0][0] if records else 0.0)
-        found = runs(frames([r for records in uploads for r in records]))
+        records = [r for records in uploads for r in records]
+        stored, unplaced = stored_runs(records)
+        found = runs(frames(records)) + stored
 
         cache_dir.mkdir(parents=True, exist_ok=True)
         opus = load_opus() if found else None
@@ -243,4 +326,4 @@ def load_captures(raw_dir: Path, db_path: Path, cache_dir: Path) -> dict:
     finally:
         db.close()
     return {"uploads": len(paths), "runs": len(rows), "hours": round(sum(r[1] for r in rows) / 3600, 2),
-            "lost_frames": sum(r[3] for r in rows)}
+            "lost_frames": sum(r[3] for r in rows), "stored_runs": len(stored), "stored_unplaced": unplaced}
