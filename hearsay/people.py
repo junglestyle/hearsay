@@ -88,6 +88,9 @@ def group_people(db_path: Path) -> dict:
         for turn_ids, c in zip(speakers, cluster(vectors)):
             members.setdefault(c, []).extend(turn_ids)
             speaker_cluster.setdefault(diarized[turn_ids[0]], c)
+        # Names come from voice-labeled turns only: a tag's time span can catch
+        # a short inherited turn the diarizer put under someone else.
+        named_by = {c: list(turn_ids) for c, turn_ids in members.items()}
         # Turns that inherited not_owner from their diarized speaker join that
         # speaker's cluster, and so its name.
         for turn_id, conversation_id, diar_speaker in db.execute(
@@ -99,8 +102,8 @@ def group_people(db_path: Path) -> dict:
                 members[c].append(turn_id)
 
         out = []
-        for turn_ids in members.values():
-            person, conflict = cluster_name(turn_ids, names)
+        for c, turn_ids in members.items():
+            person, conflict = cluster_name(named_by[c], names)
             out += [(t, min(turn_ids), person, int(conflict)) for t in turn_ids]
 
         db.executescript(SCHEMA)

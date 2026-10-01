@@ -66,6 +66,8 @@ def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
 
     tags = [
         {"type": "name", "at": at(start["a0"]), "name": "Alice"},  # one tag, from c1 only
+        # A tag that caught the inherited turn: it doesn't name (or conflict) the cluster.
+        {"type": "name", "at": at(start["s2"]), "name": "Bob"},
         {"type": "name", "at": at(start["b0"]), "name": "Bob"},
         {"type": "name", "at": at(start["b1"]), "name": "Robert"},  # conflicting names
         {"type": "name", "at": at(start["c0"]), "name": "Carol"},
