@@ -79,6 +79,11 @@ from, and conversation ids change with slice 7.
 Done when: a downstream consumer reads utterances without touching audio
 or Hearsay's internals.
 
+Amended for Idea Machine (after slice 10's first commits): `format_version`
+in the index, a per-conversation `transcript_revision` that only a new
+transcript changes, an append-only `forgotten.json` (empty until slice 12),
+and atomic writes and `revision` stated as guarantees.
+
 ## 9. iPhone pendant app
 
 A pared-down replacement for Omi's app: pendant over BLE, straight to
@@ -153,5 +158,10 @@ once tagging is reliable: until then all audio is kept, because deleted
 audio can't be re-embedded or re-tagged. First resolve how this fits
 "raw payloads are never deleted" and "everything re-runs from raw".
 
-Done when: non-owner audio is actually gone from disk, and nothing that
-depends on it breaks.
+Forgetting goes here too: the operator forgets a span, which is left out
+of the stream on every reprocess and appended to `forgotten.json`. Whether
+its raw payloads and audio are deleted is the same question as above.
+
+Done when: non-owner audio is actually gone from disk, a forgotten span is
+gone from the stream and listed in `forgotten.json`, and nothing that
+depends on either breaks.

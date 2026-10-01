@@ -148,14 +148,19 @@ output, rewritten after every hourly reprocess:
 
 - `index.json`: every conversation with start, end, `open` (still going when
   the audio stopped), `transcribed`, `taps` (times the owner marked it with
-  the pendant's button), utterance count, `revision`, and `file`.
+  the pendant's button), utterance count, `revision`, `transcript_revision`,
+  and `file`, under a top-level `format_version`.
 - `conversations/<conversation_id>.jsonl`: one utterance per line, in time
   order; fields are described under Output contract in `AGENTS.md`.
+- `forgotten.json`: append-only list of what the operator asked Hearsay to
+  forget.
 
 Treat each conversation as a unit: when its `revision` changes, re-read its
 file and replace everything you had for it. Names apply retroactively and
 conversations get re-transcribed as they grow, so individual utterances can
-change or disappear. No audio is ever in the stream.
+change or disappear; utterance ids keep their meaning only while
+`transcript_revision` does. The guarantees are under Output contract in
+`AGENTS.md`. No audio is ever in the stream.
 
 ## Importing audio the live stream missed
 

@@ -76,18 +76,30 @@ def test_stream_attributes_speakers_and_leaves_out_non_speech(tmp_path):
 def test_revisions_change_only_when_a_conversation_does(tmp_path):
     db_path, stream_dir = build(tmp_path), tmp_path / "stream"
     write_stream(db_path, stream_dir)
-    first = read(stream_dir)[0][0]["revision"]
+    assert json.loads((stream_dir / "index.json").read_text())["format_version"] == 1
+    index, utterances = read(stream_dir)
+    first, transcript = index[0]["revision"], index[0]["transcript_revision"]
+    ids = [u["utterance_id"] for u in utterances]
     write_stream(db_path, stream_dir)
     assert read(stream_dir)[0][0]["revision"] == first
 
-    # Naming someone applies to past turns, so the conversation's revision changes.
+    # Naming someone applies to past turns, so the conversation's revision
+    # changes, but the transcript and so the utterance ids don't.
     db = sqlite3.connect(db_path)
     db.execute("UPDATE turn_people SET person = 'Ana' WHERE cluster = 'k2'")
     db.commit()
     write_stream(db_path, stream_dir)
     index, utterances = read(stream_dir)
     assert index[0]["revision"] != first
+    assert index[0]["transcript_revision"] == transcript
+    assert [u["utterance_id"] for u in utterances] == ids
     assert utterances[2]["speaker"] == {"kind": "person", "name": "Ana", "label": None}
+
+    # Re-transcription: the same ids now name different speech.
+    db.execute("UPDATE turns SET end = end + 2, text = 'mine, longer' WHERE idx = 0")
+    db.commit()
+    write_stream(db_path, stream_dir)
+    assert read(stream_dir)[0][0]["transcript_revision"] != transcript
 
     # A conversation that no longer exists loses its file.
     db.execute("DELETE FROM conversations WHERE conversation_id = 'c1'")
@@ -96,3 +108,21 @@ def test_revisions_change_only_when_a_conversation_does(tmp_path):
     db.close()
     write_stream(db_path, stream_dir)
     assert list((stream_dir / "conversations").iterdir()) == []
+
+
+def test_forgotten_list_exists_and_is_never_rewritten(tmp_path):
+    db_path, stream_dir = build(tmp_path), tmp_path / "stream"
+    write_stream(db_path, stream_dir)
+    assert json.loads((stream_dir / "forgotten.json").read_text()) == []
+
+    entry = {"forgotten_at": "2026-10-01T12:00:00.000Z", "start": "2026-09-21T14:13:20.000Z",
+             "end": "2026-09-21T14:13:25.000Z", "conversation_id": "c1", "utterance_ids": ["c1:0000"],
+             "reason": "asked"}
+    (stream_dir / "forgotten.json").write_text(json.dumps([entry]))
+    db = sqlite3.connect(db_path)
+    db.execute("DELETE FROM conversations")
+    db.execute("DELETE FROM turns")
+    db.commit()
+    db.close()
+    write_stream(db_path, stream_dir)
+    assert json.loads((stream_dir / "forgotten.json").read_text()) == [entry]

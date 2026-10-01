@@ -29,8 +29,31 @@ splits it there. Both are facts about the capture, not interpretations of it.
 Speakers and text change after the fact (naming is retroactive, growing
 conversations are re-transcribed), so the unit of change is a conversation:
 consumers re-read conversations whose index revision changed and replace them
-wholesale. utterance_id is stable only while a conversation's transcript is.
-Downstream consumers read this. They never receive audio.
+wholesale. Downstream consumers read this. They never receive audio.
+
+Guarantees consumers rely on (Idea Machine, `docs/ROADMAP.md` §3 there):
+
+- `index.json` has `format_version` (an integer, now 1). Bump it on any change
+  to the index or utterance format that would break a consumer.
+- Files are written atomically (temp file, then rename), conversation files
+  first and `index.json` last, and only when their content changes.
+- `revision` is the first 16 hex characters of the sha256 of the
+  conversation file's bytes, so a consumer can detect a read that raced a
+  rewrite.
+- `transcript_revision` changes when a conversation's transcript does
+  (re-transcription, a growing conversation) and not when only speaker fields
+  do (naming, merging, owner relabeling). Within one transcript_revision a
+  given utterance_id always names the same stretch of speech; across them,
+  ids are renumbered.
+- `forgotten.json` is an append-only list, never rewritten or shrunk, one
+  entry per thing the operator asked Hearsay to forget: {forgotten_at, start,
+  end, conversation_id, utterance_ids, reason}, ids as they were. It is the
+  only deletion signal: anything else that leaves the stream was
+  restructured, not deleted. Forgetting is operator input applied on every
+  reprocess, so re-running from raw never brings forgotten speech back into
+  the stream. Raw payloads and audio of a forgotten span are kept for now:
+  deleting them is slice 12's call, alongside retention. Until the operator
+  can forget (slice 12), the list is empty.
 
 ## Invariants
 
