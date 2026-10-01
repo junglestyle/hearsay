@@ -83,9 +83,9 @@ or Hearsay's internals.
 
 A pared-down replacement for Omi's app: pendant over BLE, straight to
 Hearsay's capture receiver over the tailnet. No Omi cloud, no upsells.
-Replaces the webhook path. Native Swift, starting from the Mac pendant
-recorder (`capture/`), which proved the protocol, the spool and the upload
-format and is now retired as a product (the pendant belongs to the phone).
+Replaces the webhook path. Native Swift (`ios/`), starting from a Mac
+pendant recorder that proved the protocol, the spool and the upload format;
+it was removed once the phone took over (the pendant belongs to the phone).
 Protocol details come from Omi's open-source firmware (MIT).
 
 - Nothing lost offline: the phone spools everything verbatim with arrival

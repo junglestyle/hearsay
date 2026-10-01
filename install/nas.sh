@@ -84,10 +84,13 @@ say "Hourly reprocess (TrueNAS cron job)"
 # goes WAV -> transcript -> turns within about an hour. flock skips a run
 # while the previous one is still going. Registered through midclt so it
 # shows in the TrueNAS UI (System -> Advanced -> Cron Jobs) and survives updates.
+# The middleware appends its own "> /dev/null 2> /dev/null" to the command,
+# which would override a redirect at the end of it, so ours sits inside an
+# outer subshell.
 mkdir -p "$NAS_LOGS"
 chown "root:$APPS_GID" "$NAS_LOGS"
 chmod 750 "$NAS_LOGS"
-REPROCESS_CMD="(date -Is; flock -n /run/hearsay-reprocess.lock docker compose -f $REPO_DIR/install/compose.yaml run --rm -T reprocess </dev/null) >> $NAS_LOGS/reprocess.log 2>&1"
+REPROCESS_CMD="( (date -Is; flock -n /run/hearsay-reprocess.lock docker compose -f $REPO_DIR/install/compose.yaml run --rm -T reprocess </dev/null) >> $NAS_LOGS/reprocess.log 2>&1 )"
 cron_payload="$(python3 -c '
 import json, sys
 print(json.dumps({"user": "root", "command": sys.argv[1], "description": "hearsay reprocess",
@@ -129,7 +132,7 @@ Portal for naming speakers (save it in your password manager):
   username: $(env_get "$NAS_PORTAL_ENV" HEARSAY_PORTAL_USER)
   password: sudo sed -n 's/^HEARSAY_PORTAL_PASSWORD=//p' $NAS_PORTAL_ENV
 
-Capture receiver, for install/mac.sh on the Mac:
+Capture receiver, for the iPhone app (install/ios.sh on the Mac):
   URL:   http://$HEARSAY_TAILNET_IP:$NAS_CAPTURE_PORT/capture
   token: sudo sed -n 's/^HEARSAY_CAPTURE_TOKEN=//p' $NAS_CAPTURE_ENV
 EOF

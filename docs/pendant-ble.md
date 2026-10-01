@@ -33,7 +33,7 @@ Service `19B10000-E8F2-537E-4F6C-D104768A1214`.
 
 - `19B10001-…` audio data (notify). Packets: 2-byte LE index, 1-byte frame
   id, then codec bytes; reassemble frames, drop the in-progress frame on a
-  lost packet (`capture/`, `ios/Hearsay/Pendant.swift`).
+  lost packet (`hearsay/capture.py`).
 - `19B10002-…` codec (read): 1 PCM8, 10 PCM16, 20 or 21 Opus (21 on current
   firmware).
 - `19B10003-…` speaker (write): audio to play on pendants with a speaker.

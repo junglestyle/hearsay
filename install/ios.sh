@@ -156,13 +156,6 @@ confirm "Saved?"
 say "Connecting to the pendant"
 # Manual: the pendant takes one connection at a time, and Bluetooth
 # permission is the operator's to grant.
-if launchctl print "gui/$(id -u)/com.hearsay.capture" >/dev/null 2>&1; then
-    cat <<MSG
-The Mac pendant recorder (install/mac.sh) is running here and will hold the
-pendant. Stop it first:
-  launchctl bootout gui/$(id -u)/com.hearsay.capture
-MSG
-fi
 cat <<MSG
 The pendant accepts one connection at a time: disconnect it from Omi's app
 (or delete that app). Open Hearsay and allow Bluetooth. Within a minute it

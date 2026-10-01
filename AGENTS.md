@@ -50,22 +50,25 @@ Downstream consumers read this. They never receive audio.
 
 ## Current slice
 
-Slice 9: the iPhone pendant app (see the roadmap for the feature list). The
-Mac pendant recorder (`capture/`, Swift) proved the BLE protocol, the
-verbatim timestamped spool, the upload to the tailnet-only capture receiver
-and the decode in reprocess (`hearsay/capture.py`); it is retired as a
-product and is the starting point for the iPhone app's code. The pendant
-connects to one device at a time, so it belongs to the phone.
+Slice 10: Mac audio capture (see the roadmap). A menu-bar app on the
+operator's personal Mac, no pendant: the mic (including AirPods) and system
+audio as separate channels, run/stop from the menu bar, and automatic capture
+during Zoom calls.
 
-- Paused audio never reaches the NAS: dropped, or kept on the phone only for
-  a retention period (a switch), so raw stays never-deleted.
-- Server URL and token are settings, never hardwired.
-- iOS builds happen on the operator's Mac (Xcode); a work machine is never
-  used for capture or holds audio.
+- Uploaded like pendant audio, to the same tailnet-only capture receiver
+  (`hearsay/capture.py`); any new record kind is added on the NAS first.
+- Speech on the mic channel is the owner's, by channel; during a call the
+  call recording wins over the pendant's.
+- Only the operator's personal Mac; a work machine is never used for capture
+  or holds audio.
+- Recording calls can require everyone's consent depending on jurisdiction.
+
+Slice 9 (the iPhone pendant app, `ios/`) is built; its full-day acceptance
+run (out of range and paused stretches included) happens in normal use.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when a day of capture reaches Hearsay from the phone with Omi's cloud
-out of the loop, including a stretch out of range and a paused stretch.
+Done when a Zoom call's utterances reach the stream with the owner attributed
+by channel, started automatically.
 
 ## Engineering style
 

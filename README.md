@@ -37,10 +37,7 @@ Secrets are kept in env files outside the repo.
    app with Xcode and installs it on the phone. It asks for the capture URL
    that `nas.sh` prints; the token is entered in the app. The phone needs
    Tailscale. The pendant takes one connection at a time, so disconnect it
-   from Omi's app, and stop the Mac recorder if it runs.
-7. **Mac recorder (interim, until the phone app takes over):**
-   [`install/mac.sh`](install/mac.sh) runs the same recorder on the Mac as a
-   launchd agent. Don't run it alongside the phone app.
+   from Omi's app.
 
 To update, run `git pull` on every host, then re-run `install/nas.sh` on the
 NAS, `install/gpu.sh` on the dev box and `install/ios.sh` on the Mac. With a
@@ -84,20 +81,6 @@ resume; mute or unmute; or nothing. Each confirms with its own buzz. Single
 tap defaults to keep, double tap to pause. Holding the button 3 s turns the
 pendant off. The NAS must be updated before the
 app whenever the upload format changes, as the update order above does.
-
-## Recording from the pendant (Mac, interim)
-
-The recorder ([`capture/`](capture/)) connects to the Omi pendant over
-Bluetooth, keeps everything it sends on the Mac's disk
-(`~/.local/share/hearsay/capture-spool/`), and uploads it every minute to the
-capture receiver on the NAS, which listens on the tailnet only and stores each
-upload in `raw/capture/`. If the NAS is unreachable, uploads wait on the Mac
-and go when it's back. Log: `~/Library/Logs/hearsay-capture.log`, with a line
-a minute counting audio packets, lost packets and button presses.
-
-Tap the pendant's button once to keep what you say near the tap, from 30 s
-before it to 30 s after you stop, even when it's too short to count as a
-conversation otherwise. Holding the button for 3 s turns the pendant off.
 
 ## Reprocessing
 

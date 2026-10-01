@@ -1,7 +1,9 @@
-"""Audio from our own recorder (capture/), placed on the timeline.
+"""Audio from our own recorder, placed on the timeline.
 
-The recorder connects to the Omi pendant over BLE and uploads what the
-pendant sends, verbatim, with the time each notification arrived. The
+The recorder (the iPhone app, ios/; before it a Mac recorder, removed after
+slice 9, whose uploads are the same format) connects to the Omi pendant over
+BLE and uploads what the pendant sends, verbatim, with the time each
+notification arrived. The
 receiver (create_capture_app) stores each upload in raw/capture/. An upload
 is a sequence of records, little-endian:
 
