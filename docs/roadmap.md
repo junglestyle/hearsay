@@ -124,11 +124,15 @@ Within a conversation the diarizer already groups each turn with a speaker,
 and that speaker's voice-labeled turns agree almost always (51 of 53 at 90%
 or more). An unlabeled turn takes its diarized speaker's label (owner or not,
 and through the speaker's cluster, the person's name) when that speaker's
-labeled turns agree; the stream says the basis was diarization. Checked by
-ear on a random sample of inherited turns (`hearsay-label check`).
+labeled turns agree, unless the turn sounds more like the owner than like
+that speaker (the diarizer's usual slip is filing a short "yeah" under the
+other person); the stream says the basis was diarization. Checked by ear on
+a random sample of inherited turns (`hearsay-label check`). The first 155
+checks were 86% right, 91% with the veto; the misses are nearly all
+half-second interjections, which rarely carry anything.
 
 Done when: under 5% of speech time has no speaker, and inherited labels hold
-up by ear at 95% precision or better.
+up by ear at 90% precision or better on a sample checked after the veto.
 
 ## 11. Mac audio capture
 

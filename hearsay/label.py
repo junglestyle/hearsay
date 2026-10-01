@@ -308,14 +308,18 @@ def inheritance_report(labeled: dict[str, str]) -> None:
         return
     total = sum(seconds.values()) or 1
     print(f"\nspeech time by basis: " + ", ".join(f"{basis} {s / total:.0%}" for basis, s in sorted(seconds.items())))
-    checked = [(t["label"], labeled[t["turn_id"]]) for t in inherited
+    checked = [(t["label"], labeled[t["turn_id"]], t["end"] - t["start"]) for t in inherited
                if labeled.get(t["turn_id"]) in ("owner", "not_owner")]
-    right = sum(1 for got, heard in checked if got == heard)
+    if not checked:
+        print(f"labeled by diarization: {len(inherited)} turns, none checked by ear yet (run `check`)")
+        return
+    right = [seconds for got, heard, seconds in checked if got == heard]
+    # By speech time too: the misses are mostly half-second "yeah"s.
+    by_time = sum(right) / (sum(seconds for _, _, seconds in checked) or 1)
     print(f"labeled by diarization (agreement {DIARIZATION_AGREEMENT}): {len(inherited)} turns, "
-          f"{len(checked)} checked by ear, precision {right / len(checked):.2f}" if checked else
-          f"labeled by diarization: {len(inherited)} turns, none checked by ear yet (run `check`)")
+          f"{len(checked)} checked by ear, precision {len(right) / len(checked):.2f} ({by_time:.2f} by speech time)")
     for label in ("owner", "not_owner"):
-        mine = [heard for got, heard in checked if got == label]
+        mine = [heard for got, heard, _ in checked if got == label]
         if mine:
             print(f"  {label}: {sum(1 for h in mine if h == label)}/{len(mine)} right")
 

@@ -9,7 +9,9 @@ Tuned for precision: a turn is labeled by voice only when its similarity to
 the owner's enrolled voice is clearly high or clearly low. A turn left
 unlabeled (too short to embed, or in between) then takes the label of its
 diarized speaker in the same conversation, when that speaker's voice-labeled
-turns agree (DIARIZATION_AGREEMENT); otherwise it stays unlabeled.
+turns agree (DIARIZATION_AGREEMENT), unless it inherits not_owner yet
+sounds more like the owner than like that speaker; otherwise it stays
+unlabeled.
 """
 
 import json
@@ -38,7 +40,11 @@ NOT_OWNER_THRESHOLD = 0.14
 # Share of a diarized speaker's voice-labeled seconds that must carry one
 # label before its unlabeled turns take it. On real data (2026-10-01), 51 of
 # 53 diarized speakers with labeled turns were at least 90% one label, and
-# inheriting cut unlabeled speech from 18% to 2%.
+# inheriting cut unlabeled speech from 18% to 2%. Checked by ear on 155
+# inherited turns, 86% were right; nearly every error was a short interjection
+# the diarizer filed under the other person, from speakers that agree 99-100%,
+# so a higher bar doesn't help. Vetoing an inherited not_owner turn that
+# sounds more like the owner than like its speaker raised that to 91%.
 DIARIZATION_AGREEMENT = 0.9
 
 SCHEMA = """
@@ -122,9 +128,7 @@ def owner_voice(model, raw_dir: Path, bursts: list, labels_dir: Path, db: sqlite
         db.execute("INSERT INTO owner_enrollment VALUES (?,?,?,?)", (window["start"], window["end"], coverage, used))
     if not vectors:
         raise ValueError(f"{path}: no usable audio in the enrollment windows")
-    mean = [sum(column) / len(vectors) for column in zip(*vectors)]
-    norm = sum(x * x for x in mean) ** 0.5
-    return [x / norm for x in mean]
+    return mean_unit(vectors)
 
 
 def label_for(similarity: float) -> str | None:
@@ -150,6 +154,10 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
             " ORDER BY ca.zero_at, t.idx"
         ).fetchall()
         counts = {"turns": len(turns), "embedded": 0, "owner": 0, "not_owner": 0}
+        # Turns too short to label by voice, embedded anyway for the veto in
+        # inherit_labels. Kept out of the table: a short turn's embedding is
+        # too noisy to label or cluster with.
+        short = {}
         for turn_id, conversation_id, zero_at, start, end in turns:
             duration = max(0.0, end - start)
             pcm, coverage = cut(raw_dir, bursts, timestamp(zero_at) + start, duration) if duration else (b"", 0.0)
@@ -163,11 +171,13 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
                     label = label_for(similarity)
                     if label:
                         counts[label] += 1
+            elif duration > 0 and coverage >= MIN_COVERAGE:
+                short[turn_id] = embed(model, pcm, cache)
             db.execute(
                 "INSERT INTO turn_speakers VALUES (?,?,?,?,?,?,?)",
                 (turn_id, conversation_id, coverage, embedding, similarity, label, "voice" if label else None),
             )
-        counts.update(inherit_labels(db))
+        counts.update(inherit_labels(db, owner, short))
         db.commit()
     finally:
         db.close()
@@ -175,28 +185,52 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
     return counts
 
 
-def inherit_labels(db: sqlite3.Connection) -> dict:
+def inherit_labels(db: sqlite3.Connection, owner: list[float] | None, short: dict[str, list[float]]) -> dict:
     """Label unlabeled turns from their diarized speaker's voice-labeled turns.
 
     Within a conversation the diarizer tells voices apart well, even on turns
-    too short to embed; it's the embedding that says whose voice it is. A
-    speaker whose labeled turns disagree passes nothing on.
+    too short to embed reliably; it's the embedding that says whose voice it
+    is. A speaker whose labeled turns disagree passes nothing on.
+
+    The diarizer's usual slip is filing a short interjection ("yeah") under
+    the other person. So a turn that would inherit not_owner but sounds more
+    like the owner than like its own speaker (`short` holds the embeddings of
+    turns too short for the table) keeps no label.
     """
     rows = db.execute(
-        "SELECT ts.turn_id, t.conversation_id, t.diar_speaker, t.end - t.start, ts.label"
+        "SELECT ts.turn_id, t.conversation_id, t.diar_speaker, t.end - t.start, ts.label, ts.embedding"
         " FROM turn_speakers ts JOIN turns t ON t.turn_id = ts.turn_id WHERE t.diar_speaker IS NOT NULL"
     ).fetchall()
-    seconds = {}
-    for _, conversation_id, speaker, duration, label in rows:
+    seconds, vectors = {}, {}
+    for _, conversation_id, speaker, duration, label, embedding in rows:
         if label:
             by_label = seconds.setdefault((conversation_id, speaker), {})
             by_label[label] = by_label.get(label, 0.0) + duration
+            vectors.setdefault((conversation_id, speaker), []).append(list(array("f", embedding)))
     agreed = {}
     for key, by_label in seconds.items():
         label, top = max(by_label.items(), key=lambda item: item[1])
         if top >= DIARIZATION_AGREEMENT * sum(by_label.values()):
             agreed[key] = label
-    inherited = [(agreed[(c, s)], turn_id) for turn_id, c, s, _, label in rows if not label and (c, s) in agreed]
+    centroids = {key: mean_unit(vs) for key, vs in vectors.items()}
+
+    inherited, vetoed = [], 0
+    for turn_id, c, s, _, label, embedding in rows:
+        if label or (c, s) not in agreed:
+            continue
+        vector = short.get(turn_id) or (list(array("f", embedding)) if embedding else None)
+        if agreed[(c, s)] == "not_owner" and owner is not None and vector is not None \
+                and cosine(vector, owner) > cosine(vector, centroids[(c, s)]):
+            vetoed += 1
+            continue
+        inherited.append((agreed[(c, s)], turn_id))
     db.executemany("UPDATE turn_speakers SET label = ?, basis = 'diarization' WHERE turn_id = ?", inherited)
     return {"inherited_owner": sum(1 for label, _ in inherited if label == "owner"),
-            "inherited_not_owner": sum(1 for label, _ in inherited if label == "not_owner")}
+            "inherited_not_owner": sum(1 for label, _ in inherited if label == "not_owner"),
+            "not_inherited_sounds_like_owner": vetoed}
+
+
+def mean_unit(vectors: list[list[float]]) -> list[float]:
+    mean = [sum(column) / len(vectors) for column in zip(*vectors)]
+    norm = sum(x * x for x in mean) ** 0.5
+    return [x / norm for x in mean]

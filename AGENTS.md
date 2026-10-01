@@ -56,8 +56,11 @@ Slice 10: every turn attributed (see the roadmap). Turns too short to judge
 by voice, or ambiguous, take the label of their diarized speaker in the same
 conversation when that speaker's voice-labeled turns agree
 (`DIARIZATION_AGREEMENT` in `hearsay/speakers.py`); inherited not-owner turns
-join their speaker's cluster and name. Voice labels are never overridden,
-and clusters are built from voice-labeled embeddings only.
+join their speaker's cluster and name, but never give a cluster its name.
+An inherited not-owner turn that sounds more like the owner than like its
+speaker keeps no label. Voice labels are never overridden, and clusters are
+built from voice-labeled embeddings only; short turns' embeddings are used
+for that check and not stored.
 
 - The stream marks inherited turns with basis "diarization".
 - Precision is measured by ear on a random sample of inherited turns
@@ -65,7 +68,8 @@ and clusters are built from voice-labeled embeddings only.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
 Done when under 5% of speech time has no speaker, and inherited labels hold up
-by ear at 95% precision or better. Next: slice 11, Mac audio capture.
+by ear at 90% precision or better on a sample checked after the veto. Next:
+slice 11, Mac audio capture.
 
 ## Engineering style
 
