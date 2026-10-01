@@ -4,8 +4,8 @@ import Foundation
 /// The Omi pendant over BLE: find it, stay connected, and spool everything it
 /// sends. Nothing is decoded here; the NAS does that from the spooled bytes.
 ///
-/// UUIDs and formats are from Omi's firmware (BasedHardware/omi, MIT),
-/// omi/firmware/omi/src/lib/core/transport.c and button.c.
+/// UUIDs and formats are from Omi's firmware (BasedHardware/omi, MIT); see
+/// docs/pendant-ble.md.
 ///
 /// Runs in the background (UIBackgroundModes bluetooth-central). The pending
 /// connect never times out, so iOS completes it whenever the pendant comes
@@ -19,14 +19,24 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     static let buttonEvent = CBUUID(string: "23BA7925-0000-1000-7450-346EAC492E92")
     static let timeService = CBUUID(string: "19B10030-E8F2-537E-4F6C-D104768A1214")
     static let timeWrite = CBUUID(string: "19B10031-E8F2-537E-4F6C-D104768A1214")
+    static let settingsService = CBUUID(string: "19B10010-E8F2-537E-4F6C-D104768A1214")
+    static let micGain = CBUUID(string: "19B10012-E8F2-537E-4F6C-D104768A1214")
     private static let rememberedKey = "pendantID"
+    private static let mutedKey = "muted"
+    private static let gainBeforeMuteKey = "micGainBeforeMute"
+    private static let defaultGain: UInt8 = 6
 
     @Published private(set) var state = "starting"
     @Published private(set) var lastMinute = ""
+    /// What the operator asked for; applied whenever the pendant is connected.
+    @Published private(set) var muted = UserDefaults.standard.bool(forKey: Pendant.mutedKey)
 
-    private let spool: Spool
+    /// Where what the pendant sends goes; nil drops it (paused).
+    private var spool: Spool?
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
+    private var codec: Data?
+    private var gain: CBCharacteristic?
 
     // For the once-a-minute summary.
     private var packets = 0
@@ -34,11 +44,32 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     private var taps = 0
     private var lastIndex: UInt16?
 
-    init(spool: Spool) {
-        self.spool = spool
+    override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main,
                                    options: [CBCentralManagerOptionRestoreIdentifierKey: "pendant"])
+    }
+
+    /// Send from now on to `spool`, or drop if nil. Each destination's audio
+    /// starts with a CONNECTED record, as after a connect: the NAS needs the
+    /// codec to decode it, and the record restarts its count of the pendant's
+    /// packet index, which jumps over whatever went elsewhere.
+    func route(to spool: Spool?) {
+        self.spool = spool
+        if let codec { spool?.append(kind: Spool.connected, data: codec) }
+    }
+
+    /// Mute in hardware: mic gain 0, saved on the pendant, so it holds out of
+    /// range and across app crashes until unmuted. Unmuting restores the
+    /// level from before.
+    func setMuted(_ on: Bool) {
+        muted = on
+        UserDefaults.standard.set(on, forKey: Self.mutedKey)
+        log.info("\(on ? "muting" : "unmuting")")
+        // Reconciled against the pendant's level once it's read.
+        if let gain, let peripheral, peripheral.state == .connected {
+            peripheral.readValue(for: gain)
+        }
     }
 
     func report() {
@@ -117,7 +148,9 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
         state = "connected"
         log.info("connected")
         lastIndex = nil
-        peripheral.discoverServices([Self.audioService, Self.buttonService, Self.timeService])
+        codec = nil
+        gain = nil
+        peripheral.discoverServices([Self.audioService, Self.buttonService, Self.timeService, Self.settingsService])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
@@ -154,6 +187,9 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
                 // clock has been set; Omi's app sets it on every connect.
                 let now = UInt32(Date().timeIntervalSince1970).littleEndian
                 peripheral.writeValue(withUnsafeBytes(of: now) { Data($0) }, for: characteristic, type: .withResponse)
+            case Self.micGain:
+                gain = characteristic
+                peripheral.readValue(for: characteristic)
             default:
                 break
             }
@@ -164,24 +200,53 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
         guard let value = characteristic.value else { return }
         switch characteristic.uuid {
         case Self.audioData:
-            spool.append(kind: Spool.audio, data: value)
+            spool?.append(kind: Spool.audio, data: value)
             count(value)
         case Self.buttonEvent:
-            spool.append(kind: Spool.button, data: value)
+            spool?.append(kind: Spool.button, data: value)
             taps += 1
         case Self.audioCodec:
             log.info("codec \(value.first.map { "\($0)" } ?? "?")")
-            spool.append(kind: Spool.connected, data: value)
+            codec = value
+            spool?.append(kind: Spool.connected, data: value)
             let data = characteristic.service?.characteristics?.first { $0.uuid == Self.audioData }
             if let data { peripheral.setNotifyValue(true, for: data) }
+        case Self.micGain:
+            if let level = value.first { reconcile(level, peripheral, characteristic) }
         default:
             break
         }
     }
 
+    /// Make the pendant's mic gain match `muted`. A level of 0 while not
+    /// muted is a mute left behind (an unmute that never reached the
+    /// pendant), so it's undone too.
+    private func reconcile(_ level: UInt8, _ peripheral: CBPeripheral, _ characteristic: CBCharacteristic) {
+        if muted, level != 0 {
+            UserDefaults.standard.set(Int(level), forKey: Self.gainBeforeMuteKey)
+            peripheral.writeValue(Data([0]), for: characteristic, type: .withResponse)
+        } else if !muted, level == 0 {
+            let saved = UserDefaults.standard.object(forKey: Self.gainBeforeMuteKey) as? Int
+            let restore = saved.flatMap { UInt8(exactly: $0) } ?? Self.defaultGain
+            peripheral.writeValue(Data([restore]), for: characteristic, type: .withResponse)
+        }
+    }
+
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        if characteristic.uuid == Self.timeWrite, let error {
-            log.error("setting the pendant's clock failed: \(error)")
+        switch characteristic.uuid {
+        case Self.timeWrite:
+            if let error { log.error("setting the pendant's clock failed: \(error)") }
+        case Self.micGain:
+            if let error {
+                log.error("setting the pendant's mic gain failed: \(error)")
+                return
+            }
+            log.info("pendant \(self.muted ? "muted" : "unmuted")")
+            // Only once the pendant has the level back, so a failed unmute
+            // still restores it on the next connect.
+            if !muted { UserDefaults.standard.removeObject(forKey: Self.gainBeforeMuteKey) }
+        default:
+            break
         }
     }
 

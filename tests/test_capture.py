@@ -112,3 +112,33 @@ def test_recorder_uploads_become_timed_decoded_runs(tmp_path):
     rebuild(raw, db_path)
     load_captures(raw, db_path, cache)
     assert list(cache.glob("*.pcm")) == []
+
+
+def test_paused_stretch_is_a_gap_until_kept(tmp_path):
+    # The iPhone app (ios/Hearsay/Pause.swift) seals the spool at pause and
+    # starts each destination with a CONNECTED record. A dropped pause leaves
+    # a gap with nothing concealed in it; a paused window kept days later
+    # arrives last and fills its place.
+    raw, db_path, cache = tmp_path / "raw", tmp_path / "h.sqlite", tmp_path / "capture-pcm"
+    t0 = T.timestamp()
+    frames = opus_frames(150)
+
+    def stretch(start, first_index):
+        out = [record(start, CONNECTED, bytes([21]))]
+        for i in range(50):
+            index = first_index + i
+            out.append(record(start + (i + 1) * 0.02, AUDIO, struct.pack("<HB", index, 0) + frames[index]))
+        return b"".join(out)
+
+    upload(raw, T + timedelta(seconds=10), "k-before", stretch(t0, 0))
+    upload(raw, T + timedelta(seconds=20), "k-after", stretch(t0 + 2, 100))
+    rebuild(raw, db_path)
+    assert load_captures(raw, db_path, cache) == {"uploads": 2, "runs": 2, "hours": 0.0, "lost_frames": 0}
+
+    upload(raw, T + timedelta(days=3), "k-paused", stretch(t0 + 1, 50))
+    rebuild(raw, db_path)
+    assert load_captures(raw, db_path, cache)["lost_frames"] == 0
+    db = sqlite3.connect(db_path)
+    rows = db.execute("SELECT start, duration FROM captured_audio").fetchall()
+    db.close()
+    assert len(rows) == 1 and abs(rows[0][0] - t0) < 0.05 and rows[0][1] == pytest.approx(3.0)

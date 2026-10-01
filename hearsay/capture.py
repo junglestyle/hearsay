@@ -8,7 +8,9 @@ is a sequence of records, little-endian:
     f64 at      unix seconds on the recorder's clock when it arrived
     u8  kind    CONNECTED, AUDIO or BUTTON
     u16 length
-    bytes       CONNECTED: the codec byte read on connect (19B10002)
+    bytes       CONNECTED: the codec byte read on connect (19B10002); the
+                iPhone app also writes one on resuming from a pause, since
+                the index jumps over audio that went elsewhere
                 AUDIO: one notification from 19B10001, header included
                 BUTTON: one notification from 23BA7925
 
