@@ -8,5 +8,14 @@
     <string>hearsay-capture</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Hearsay records audio from your Omi pendant over Bluetooth.</string>
+    <!-- Uploads go to the NAS's capture receiver over plain HTTP on the
+         tailnet, where WireGuard encrypts them. App Transport Security blocks
+         HTTP otherwise, and its per-domain exceptions can't name an IP
+         address; the recorder only ever connects to HEARSAY_CAPTURE_URL. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
 </dict>
 </plist>
