@@ -32,14 +32,20 @@ Secrets are kept in env files outside the repo.
    from the NAS over `ssh nas` and writes transcripts back. It asks for a
    Hugging Face token for the gated diarization model. Then reprocess again.
 
-6. **Mac, as your user (replaces Omi's app and cloud as the audio path):**
-   [`install/mac.sh`](install/mac.sh) builds the pendant recorder and runs it
-   as a launchd agent. It asks for the capture URL and token that `nas.sh`
-   prints. Before its last step, disconnect the pendant from Omi's app on your
-   phone: the pendant takes one connection at a time.
+6. **iPhone, from the Mac, as your user (replaces Omi's app and cloud as
+   the audio path):** [`install/ios.sh`](install/ios.sh) builds the pendant
+   app with Xcode and installs it on the phone. It asks for the capture URL
+   that `nas.sh` prints; the token is entered in the app. The phone needs
+   Tailscale. The pendant takes one connection at a time, so disconnect it
+   from Omi's app, and stop the Mac recorder if it runs.
+7. **Mac recorder (interim, until the phone app takes over):**
+   [`install/mac.sh`](install/mac.sh) runs the same recorder on the Mac as a
+   launchd agent. Don't run it alongside the phone app.
 
 To update, run `git pull` on every host, then re-run `install/nas.sh` on the
-NAS, `install/gpu.sh` on the dev box and `install/mac.sh` on the Mac.
+NAS, `install/gpu.sh` on the dev box and `install/ios.sh` on the Mac. With a
+free Apple ID the phone's install expires after 7 days; re-running
+`install/ios.sh` renews it.
 
 ## Data
 
@@ -52,7 +58,17 @@ Webhooks land in `/mnt/storage/hearsay/raw/<type>/<date>/`:
 Omi's cloud backend sends every webhook, not the phone. The `cf-connecting-ip`
 header in the sidecars records where each request came from.
 
-## Recording from the pendant (Mac)
+## Recording from the pendant (iPhone)
+
+The app ([`ios/`](ios/)) connects to the Omi pendant over Bluetooth, keeps
+everything it sends on the phone (in the app's own storage, excluded from
+backups), and uploads it every minute to the capture receiver on the NAS over
+the tailnet. It keeps recording in the background, and iOS relaunches it when
+the pendant comes back in range. If the NAS is unreachable, uploads wait on
+the phone. The app shows the pendant's state, the last minute's packet
+counts, and how many uploads are waiting.
+
+## Recording from the pendant (Mac, interim)
 
 The recorder ([`capture/`](capture/)) connects to the Omi pendant over
 Bluetooth, keeps everything it sends on the Mac's disk

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Hearsay records audio from your Omi pendant over Bluetooth.</string>
+    <!-- Keeps the pendant connection, and recording, alive in the background. -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>bluetooth-central</string>
+    </array>
+    <!-- Uploads go to the NAS's capture receiver over plain HTTP on the
+         tailnet, where WireGuard encrypts them. App Transport Security blocks
+         HTTP otherwise, and its per-domain exceptions can't name an IP
+         address; the app only ever connects to the capture URL in Settings. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+</dict>
+</plist>

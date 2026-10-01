@@ -75,3 +75,6 @@ pretrained_models/
 # --- Logs ---
 *.log
 logs/
+
+# --- Xcode per-user state ---
+xcuserdata/
