@@ -75,24 +75,27 @@ Guarantees consumers rely on (Idea Machine, `docs/ROADMAP.md` §3 there):
 
 ## Current slice
 
-Slice 10: every turn attributed (see the roadmap). Turns too short to judge
-by voice, or ambiguous, take the label of their diarized speaker in the same
-conversation when that speaker's voice-labeled turns agree
-(`DIARIZATION_AGREEMENT` in `hearsay/speakers.py`); inherited not-owner turns
-join their speaker's cluster and name, but never give a cluster its name.
-An inherited not-owner turn that sounds more like the owner than like its
-speaker keeps no label. Voice labels are never overridden, and clusters are
-built from voice-labeled embeddings only; short turns' embeddings are used
-for that check and not stored.
+Slice 11: Mac audio capture (see the roadmap). A menu-bar app on the
+operator's personal Mac, no pendant: the mic (including AirPods) and system
+audio as separate channels, run/stop from the menu bar, and automatic capture
+during Zoom calls.
 
-- The stream marks inherited turns with basis "diarization".
-- Precision is measured by ear on a random sample of inherited turns
-  (`hearsay-label check`, then `report`), not assumed from agreement.
+- Uploaded like pendant audio, to the same tailnet-only capture receiver
+  (`hearsay/capture.py`); any new record kind is added on the NAS first.
+- Speech on the mic channel is the owner's, by channel; during a call the
+  call recording wins over the pendant's.
+- Only the operator's personal Mac; a work machine is never used for capture
+  or holds audio.
+- Recording calls can require everyone's consent depending on jurisdiction.
+
+Slice 10 (every turn attributed) is done: turns voice can't judge inherit
+their diarized speaker's label (`hearsay/speakers.py`). Voice labels are
+never overridden, and clusters are built and named from voice-labeled turns
+only.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when under 5% of speech time has no speaker, and inherited labels hold up
-by ear at 90% precision or better on a sample checked after the veto. Next:
-slice 11, Mac audio capture.
+Done when a Zoom call's utterances reach the stream with the owner attributed
+by channel, started automatically. Next: slice 12, retention.
 
 ## Engineering style
 
