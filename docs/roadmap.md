@@ -139,10 +139,9 @@ half-second interjections, which rarely carry anything.
 Done when: under 5% of speech time has no speaker, and inherited labels hold
 up by ear at 90% precision or better on a sample checked after the veto.
 
-Done 2026-10-01: 3% of speech time has no speaker (voice 82%, diarization
-15%), and 266 inherited turns checked by ear are 93% right (92% by speech
-time; owner 74/81, not owner 174/185), the fresh post-veto checks better
-than the first 155.
+Done 2026-10-01: 3.2% of speech time has no speaker (voice 82%,
+diarization 15%), and 278 inherited turns checked by ear after the veto are
+96.4% right (96.2% by speech time).
 
 ## 11. Mac audio capture
 
