@@ -2,9 +2,9 @@
 
 Runs voice activity detection (Silero) over every continuous run of audio,
 then groups the speech: a conversation ends after GAP seconds without speech,
-and one with less than MIN_SPEECH seconds of speech is dropped, unless the
-owner tapped the pendant's button within TAP_WINDOW of it (a self-note,
-marked on purpose). Content is
+or at an end mark the owner made with the pendant's button. One with less
+than MIN_SPEECH seconds of speech is dropped, unless there's a start mark
+within TAP_WINDOW of it (a self-note, marked on purpose). Content is
 never consulted, so conversations can run for hours; splitting by topic is a
 downstream concern. Dropped speech stays in raw and returns if the rules change.
 
@@ -20,14 +20,13 @@ from pathlib import Path
 
 from hearsay.assemble import SAMPLE_RATE, place_bursts
 from hearsay.cache import Cache, audio_key
-from hearsay.capture import SINGLE_TAP
 
 # A conversation ends after this long without speech.
 GAP = 180.0
 # Conversations with less speech than this are dropped (stray remarks,
 # passing chatter).
 MIN_SPEECH = 30.0
-# A single tap this close to a stretch of speech keeps it, however short.
+# A start mark this close to a stretch of speech keeps it, however short.
 TAP_WINDOW = 30.0
 # Audio kept around the first and last speech, so words aren't clipped.
 PAD = 1.0
@@ -46,7 +45,7 @@ CREATE TABLE conversations (
     open INTEGER NOT NULL             -- 1 if the audio ends less than GAP after its last speech
 );
 DROP TABLE IF EXISTS conversation_taps;
--- Single taps of the pendant's button within TAP_WINDOW of a conversation.
+-- Start marks within TAP_WINDOW of a conversation.
 CREATE TABLE conversation_taps (
     conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id),
     at REAL NOT NULL                  -- unix seconds
@@ -58,12 +57,17 @@ def near(tap: float, start: float, end: float) -> bool:
     return start - TAP_WINDOW <= tap <= end + TAP_WINDOW
 
 
-def group_speech(speech: list[tuple[float, float]], taps: list[float] = ()) -> list[tuple[float, float, float]]:
+def group_speech(speech: list[tuple[float, float]], taps: list[float] = (),
+                 ends: list[float] = ()) -> list[tuple[float, float, float]]:
     """(start, end, seconds of speech) per conversation, from speech intervals
-    and the times of single taps."""
+    and the times of start marks (taps) and end marks. Speech that starts
+    after an end mark begins a new conversation, however soon it follows."""
     groups = []
+    last_start = None
     for start, end in sorted(speech):
-        if groups and start - groups[-1][1] <= GAP:
+        split = any(last_start < mark <= start for mark in ends) if last_start is not None else False
+        last_start = start
+        if groups and start - groups[-1][1] <= GAP and not split:
             groups[-1][1] = max(groups[-1][1], end)
             groups[-1][2] += end - start
         else:
@@ -115,9 +119,10 @@ def find_conversations(raw_dir: Path, db_path: Path, cache: Cache | None = None)
     try:
         bursts = place_bursts(db)
         speech = detect_speech(raw_dir, bursts, cache)
-        taps = [at for (at,) in db.execute("SELECT at FROM button_events WHERE event = ?", (SINGLE_TAP,))]
+        taps = [at for (at,) in db.execute("SELECT at FROM marks WHERE kind = 'start'")]
+        ends = [at for (at,) in db.execute("SELECT at FROM marks WHERE kind = 'end'")]
         stream_end = max((end for _, end, _ in bursts), default=0.0)
-        groups = group_speech(speech, taps)
+        groups = group_speech(speech, taps, ends)
         rows = [
             (conversation_id(start), start - PAD, end + PAD, seconds, int(stream_end - end < GAP))
             for start, end, seconds in groups

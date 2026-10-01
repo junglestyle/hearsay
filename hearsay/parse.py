@@ -94,7 +94,15 @@ CREATE TABLE audio_chunks (
 CREATE TABLE button_events (
     payload_path TEXT NOT NULL REFERENCES payloads(path),
     at REAL NOT NULL,                -- unix seconds, on the recorder's clock
-    event INTEGER NOT NULL           -- 1 tap, 2 double tap, 5 release after a hold
+    event INTEGER NOT NULL           -- 1 tap, 2 double tap, 5 release
+);
+
+-- Conversation marks made with the button (capture.marks): start keeps the
+-- conversation around it however short, end splits there.
+CREATE TABLE marks (
+    payload_path TEXT NOT NULL REFERENCES payloads(path),
+    at REAL NOT NULL,                -- unix seconds, on the recorder's clock
+    kind TEXT NOT NULL               -- start | end
 );
 """
 
@@ -172,9 +180,11 @@ def parse_audio(db: sqlite3.Connection, path: str, body: bytes, query: dict) -> 
 
 
 def parse_capture(db: sqlite3.Connection, path: str, body: bytes) -> None:
-    for at, kind, data in capture.read_records(body):
+    records = capture.read_records(body)
+    for at, kind, data in records:
         if kind == capture.BUTTON:
             db.execute("INSERT INTO button_events VALUES (?,?,?)", (path, at, capture.button_event(data)))
+    db.executemany("INSERT INTO marks VALUES (?,?,?)", [(path, at, mark) for at, mark in capture.marks(records)])
 
 
 def load_payloads(db: sqlite3.Connection, raw_dir: Path) -> tuple[dict, list[str]]:

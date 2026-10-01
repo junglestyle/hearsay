@@ -50,13 +50,16 @@ Service `23BA7924-0000-1000-7450-346EAC492E92`, characteristic
 
 | Value | Event |
 |---|---|
-| 1 | single tap |
+| 1 | single tap (sent about 300 ms after release, once a double is ruled out) |
 | 2 | double tap |
-| 3 | long tap |
-| 4 | press |
 | 5 | release |
 
-Taps are what to map to actions; press/release are the raw edges.
+What the consumer firmware actually sends (`lib/core/button.c`): every tap
+and double tap is followed by a release. A hold of 0.3–3 s sends only a
+release, and only when the event before wasn't one, which after any tap it
+is, so holds are effectively never reported. Holding 3 s powers the pendant
+off (it never sends 3, long tap). So single and double tap are the gestures
+to map to actions; ignore release.
 
 ## Haptic
 

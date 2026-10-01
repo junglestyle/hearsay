@@ -19,9 +19,10 @@ owner_similarity}. Speaker kinds: owner, person (named), anonymous (labeled
 per conversation, e.g. "anon A"), stranger, unknown. `_noise` and `_media`
 turns are left out; other `_` names are categories, not people.
 
-Each index entry also lists `taps`: when the owner tapped the pendant's
-button near that conversation (a self-note, kept even when it's short). It
-is a fact about the capture, not an interpretation of it.
+Each index entry also lists `taps`: when the owner marked that conversation
+with the pendant's button (a start mark, e.g. a self-note, kept even when
+it's short). The owner can also end a conversation with the button, which
+splits it there. Both are facts about the capture, not interpretations of it.
 
 Speakers and text change after the fact (naming is retroactive, growing
 conversations are re-transcribed), so the unit of change is a conversation:

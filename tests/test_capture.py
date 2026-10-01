@@ -9,7 +9,7 @@ from datetime import timedelta
 import pytest
 
 from hearsay import capture
-from hearsay.capture import AUDIO, BUTTON, CONNECTED, STORED, load_captures
+from hearsay.capture import ACTION, AUDIO, BUTTON, CONNECTED, STORED, load_captures
 from hearsay.parse import rebuild
 from test_assemble import T
 
@@ -93,6 +93,11 @@ def test_recorder_uploads_become_timed_decoded_runs(tmp_path):
     taps = db.execute("SELECT at, event FROM button_events").fetchall()
     db.close()
     assert taps == [(t0 + 7.5, 1)]
+    # No ACTION records: a recorder from before configurable buttons, where a
+    # single tap meant start.
+    db = sqlite3.connect(db_path)
+    assert db.execute("SELECT at, kind FROM marks").fetchall() == [(t0 + 7.5, "start")]
+    db.close()
     (s1, d1, n1, lost1, pcm1), (s2, d2, n2, lost2, _) = rows
     assert abs(s1 - t0) < 0.05 and d1 == pytest.approx(2.0) and (n1, lost1) == (100, 1)
     assert abs(s2 - (t0 + 7)) < 0.05 and d2 == pytest.approx(1.0) and (n2, lost2) == (50, 0)
@@ -191,3 +196,22 @@ def test_audio_stored_while_away_is_placed_by_the_pendants_clock(tmp_path):
     (s1, d1, n1, lost1), (s2, d2, n2, _) = rows
     assert (n1, n2, lost1) == (50, 50, 0) and d1 == pytest.approx(1.0) and d2 == pytest.approx(1.0)
     assert abs(s1 - (away + 10)) < 1 and abs(s2 - (away + 30)) < 1
+
+
+def test_marks_follow_what_the_app_did_with_each_tap(tmp_path):
+    raw, db_path = tmp_path / "raw", tmp_path / "h.sqlite"
+    t0 = T.timestamp()
+    tap, double = struct.pack("<ii", 1, 0), struct.pack("<ii", 2, 0)
+    body = b"".join([
+        # Single tap set to do nothing, then to start, then a double tap to end.
+        record(t0, BUTTON, tap), record(t0, ACTION, bytes([1, 0])),
+        record(t0 + 10, BUTTON, tap), record(t0 + 10, ACTION, bytes([1, 1])),
+        record(t0 + 20, BUTTON, double), record(t0 + 20, ACTION, bytes([2, 2])),
+        # A pause: a fact, not a mark.
+        record(t0 + 30, BUTTON, double), record(t0 + 30, ACTION, bytes([2, 3])),
+    ])
+    upload(raw, T + timedelta(minutes=1), "k-actions", body)
+    rebuild(raw, db_path)
+    db = sqlite3.connect(db_path)
+    assert db.execute("SELECT at, kind FROM marks ORDER BY at").fetchall() == [(t0 + 10, "start"), (t0 + 20, "end")]
+    db.close()

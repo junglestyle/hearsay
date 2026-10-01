@@ -74,7 +74,14 @@ pendant's clock. Pause keeps audio from reaching the NAS (dropped, or kept on
 the phone for 30 days, where a paused stretch can be played, cropped to one
 selection and uploaded, or deleted); if the app was paused at any time
 while the pendant was away, everything it stored then counts as paused. Mute
-turns the pendant's mic off in hardware. The NAS must be updated before the
+turns the pendant's mic off in hardware.
+
+The pendant's single and double tap are set in the app (Pendant button): mark
+to keep the conversation around the tap, from 30 s before it to 30 s after
+you stop, even when it's short; mark to end the conversation there; pause or
+resume; mute or unmute; or nothing. Each confirms with its own buzz. Single
+tap defaults to keep, double tap to pause. Holding the button 3 s turns the
+pendant off. The NAS must be updated before the
 app whenever the upload format changes, as the update order above does.
 
 ## Recording from the pendant (Mac, interim)
@@ -152,8 +159,8 @@ as a command with
 output, rewritten after every hourly reprocess:
 
 - `index.json`: every conversation with start, end, `open` (still going when
-  the audio stopped), `transcribed`, `taps` (times the owner tapped the
-  pendant's button near it), utterance count, `revision`, and `file`.
+  the audio stopped), `transcribed`, `taps` (times the owner marked it with
+  the pendant's button), utterance count, `revision`, and `file`.
 - `conversations/<conversation_id>.jsonl`: one utterance per line, in time
   order; fields are described under Output contract in `AGENTS.md`.
 

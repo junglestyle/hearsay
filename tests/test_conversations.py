@@ -30,3 +30,11 @@ def test_a_tap_keeps_a_short_self_note_but_only_near_it():
     for tap in (T - TAP_WINDOW + 1, T + 8 + TAP_WINDOW - 1):
         assert group_speech([note, remark], [tap]) == [(T, T + 8, 8.0)]
     assert group_speech([note, remark], [T - TAP_WINDOW - 1]) == []
+
+
+def test_an_end_mark_splits_however_soon_speech_resumes():
+    first, second = (T, T + 40), (T + 60, T + 100)
+    assert group_speech([first, second]) == [(T, T + 100, 80.0)]
+    assert group_speech([first, second], ends=[T + 50]) == [(T, T + 40, 40.0), (T + 60, T + 100, 40.0)]
+    # Pressed mid-sentence: the speech under way stays with what came before.
+    assert group_speech([first, second], ends=[T + 20]) == [(T, T + 40, 40.0), (T + 60, T + 100, 40.0)]

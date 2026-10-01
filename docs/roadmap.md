@@ -102,9 +102,11 @@ Protocol details come from Omi's open-source firmware (MIT).
   the previous level).
 - Optional conversation markers: start (keep what follows even if short,
   e.g. self-notes) and end (force a split).
-- Configurable actions for the pendant's single tap, double tap and long
-  press, each with its own haptic pattern. The firmware's haptic
-  characteristic plays 100/300/500 ms buzzes; patterns are sequences of them.
+- Configurable actions for the pendant's single and double tap (the
+  consumer firmware reports no other gesture: holds go unreported, and 3 s
+  powers it off), each action with its own haptic pattern. The firmware's
+  haptic characteristic plays 100/300/500 ms buzzes; patterns are sequences
+  of them.
 - Server URL and token are settings, not hardwired, so the app isn't tied to
   one Hearsay install.
 - Signing: a free Apple ID while building (installs expire after 7 days),

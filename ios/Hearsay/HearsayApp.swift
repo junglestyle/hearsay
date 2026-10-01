@@ -15,6 +15,7 @@ final class Recorder {
     let spool: Spool
     let pendant: Pendant
     let pause: Pause
+    let buttons: Buttons
     let uploader: Uploader
 
     private init() {
@@ -27,6 +28,7 @@ final class Recorder {
         }
         pendant = Pendant()
         pause = Pause(root: support.appendingPathComponent("paused"), spool: spool, pendant: pendant)
+        buttons = Buttons(pendant: pendant, pause: pause)
         uploader = Uploader(spool: spool)
 
         // Uploads cover a minute each; the NAS reprocesses hourly, so there's
@@ -53,7 +55,8 @@ struct HearsayApp: App {
 
     var body: some Scene {
         WindowGroup {
-            StatusView(pendant: recorder.pendant, pause: recorder.pause, uploader: recorder.uploader)
+            StatusView(pendant: recorder.pendant, pause: recorder.pause, buttons: recorder.buttons,
+                       uploader: recorder.uploader)
         }
     }
 }
@@ -61,6 +64,7 @@ struct HearsayApp: App {
 struct StatusView: View {
     @ObservedObject var pendant: Pendant
     @ObservedObject var pause: Pause
+    @ObservedObject var buttons: Buttons
     @ObservedObject var uploader: Uploader
     @State private var url = Settings.urlText
     @State private var token = ""
@@ -88,6 +92,18 @@ struct StatusView: View {
                                                                 set: { pendant.setMuted($0) }))
                 } footer: {
                     Text("Turns the pendant's mic off in hardware. It stays off, even out of range, until unmuted here.")
+                }
+                Section {
+                    Picker("Single tap", selection: $buttons.single) {
+                        ForEach(Buttons.Action.allCases) { Text($0.label).tag($0) }
+                    }
+                    Picker("Double tap", selection: $buttons.double) {
+                        ForEach(Buttons.Action.allCases) { Text($0.label).tag($0) }
+                    }
+                } header: {
+                    Text("Pendant button")
+                } footer: {
+                    Text("Buzzes: keep one short, end one medium; pause one long, resume two short; mute two long, unmute three short. Holding the button 3 s turns the pendant off.")
                 }
                 Section {
                     Text(pauseStatus)

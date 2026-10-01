@@ -6,7 +6,7 @@ receiver (create_capture_app) stores each upload in raw/capture/. An upload
 is a sequence of records, little-endian:
 
     f64 at      unix seconds on the recorder's clock when it arrived
-    u8  kind    CONNECTED, AUDIO, BUTTON or STORED
+    u8  kind    CONNECTED, AUDIO, BUTTON, STORED or ACTION
     u16 length
     bytes       CONNECTED: the codec byte read on connect (19B10002); the
                 iPhone app also writes one on resuming from a pause, since
@@ -16,6 +16,8 @@ is a sequence of records, little-endian:
                 STORED: codec u8, the pendant's sequence number u64,
                 start of the pendant's away stretch f64 (0 if unknown),
                 then one 444-byte packet of audio it stored while away
+                ACTION: the button event u8 and what the iPhone app did
+                about it u8 (ACTION_* below), written after the event
 
 An audio notification is [index u16 LE][sub u8][Opus bytes]. index counts
 notifications and wraps at 65535; sub 0 starts a frame, and a frame split
@@ -51,7 +53,7 @@ from pathlib import Path
 
 from hearsay.assemble import SAMPLE_RATE
 
-CONNECTED, AUDIO, BUTTON, STORED = 1, 2, 3, 4
+CONNECTED, AUDIO, BUTTON, STORED, ACTION = 1, 2, 3, 4, 5
 RECORD_HEADER = struct.Struct("<dBH")
 STORED_HEADER = struct.Struct("<BQd")
 STORED_PACKET = 444
@@ -61,9 +63,14 @@ STORED_AUDIO = 440
 # DevKit; the firmware builds nothing else.
 FRAME_SAMPLES = {20: 160, 21: 320}
 
-# Button events (button.c): the consumer firmware sends SINGLE_TAP,
-# DOUBLE_TAP, and RELEASE after a press held over 300 ms.
+# Button events (button.c): the consumer firmware sends SINGLE_TAP and
+# DOUBLE_TAP, each followed by a RELEASE (5); holds aren't reported.
 SINGLE_TAP = 1
+
+# What the iPhone app did about a button event. Only marks matter here:
+# START keeps the conversation around it however short, END splits there.
+# The rest (nothing, paused, resumed, muted, unmuted) are recorded as facts.
+ACTION_START, ACTION_END = 1, 2
 
 # A frame arriving this far from where end-to-end placement puts it starts a
 # new run: the mic slept, or the link dropped.
@@ -94,7 +101,7 @@ def read_records(body: bytes) -> list[tuple[float, int, bytes]]:
             raise ValueError(f"truncated record header at byte {offset}")
         at, kind, length = RECORD_HEADER.unpack_from(body, offset)
         offset += RECORD_HEADER.size
-        if kind not in (CONNECTED, AUDIO, BUTTON, STORED):
+        if kind not in (CONNECTED, AUDIO, BUTTON, STORED, ACTION):
             raise ValueError(f"unknown record kind {kind} at byte {offset}")
         if offset + length > len(body):
             raise ValueError(f"truncated record at byte {offset}")
@@ -108,6 +115,20 @@ def button_event(data: bytes) -> int:
     if len(data) < 4:
         raise ValueError(f"button notification of {len(data)} bytes")
     return int.from_bytes(data[:4], "little")
+
+
+def marks(records: list[tuple[float, int, bytes]]) -> list[tuple[float, str]]:
+    """(at, "start" or "end") for the marks the owner made in one upload.
+
+    The iPhone app writes an ACTION record for every tap it handles. An
+    upload with none comes from a recorder that didn't (the Mac recorder,
+    earlier app builds), where a single tap always meant start.
+    """
+    actions = [(at, data[1]) for at, kind, data in records if kind == ACTION and len(data) >= 2]
+    if not actions:
+        return [(at, "start") for at, kind, data in records if kind == BUTTON and button_event(data) == SINGLE_TAP]
+    names = {ACTION_START: "start", ACTION_END: "end"}
+    return [(at, names[action]) for at, action in actions if action in names]
 
 
 def frames(records: list[tuple[float, int, bytes]]) -> list[tuple[float, int, bytes | None]]:

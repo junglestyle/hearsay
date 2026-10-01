@@ -17,6 +17,8 @@ final class Spool {
     /// sequence number u64 LE, start of the away stretch f64 LE (0 unknown),
     /// then the stored packet as the pendant keeps it.
     static let stored: UInt8 = 4
+    /// What the app did about a button event (Buttons): event u8, outcome u8.
+    static let action: UInt8 = 5
 
     let dir: URL
     private let current: URL

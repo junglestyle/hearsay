@@ -23,6 +23,8 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     static let micGain = CBUUID(string: "19B10012-E8F2-537E-4F6C-D104768A1214")
     static let storageService = CBUUID(string: "30295780-4301-EABD-2904-2849ADFEAE43")
     static let storageControl = CBUUID(string: "30295781-4301-EABD-2904-2849ADFEAE43")
+    static let hapticService = CBUUID(string: "CAB1AB95-2EA5-4F4D-BB56-874B72CFC984")
+    static let hapticWrite = CBUUID(string: "CAB1AB96-2EA5-4F4D-BB56-874B72CFC984")
     /// A stored packet: [pendant time u32 BE][440 bytes of [len u8][Opus]...].
     static let storedPacketBytes = 444
     private static let rememberedKey = "pendantID"
@@ -39,6 +41,8 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
 
     /// Decides where downloaded audio goes; set by Pause.
     weak var pause: Pause?
+    /// Called with each button event, after it's spooled.
+    var onButton: ((UInt8) -> Void)?
 
     /// Where what the pendant sends goes; nil drops it (paused).
     private var spool: Spool?
@@ -47,6 +51,7 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     private var codec: Data?
     private var gain: CBCharacteristic?
     private var storage: CBCharacteristic?
+    private var haptic: CBCharacteristic?
     private var storageNotifying = false
     private var downloading = false
     // The transfer in progress: the next packet's sequence number on the
@@ -76,6 +81,25 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     func route(to spool: Spool?) {
         self.spool = spool
         if let codec { spool?.append(kind: Spool.connected, data: codec) }
+    }
+
+    /// Spool a record alongside the live audio (dropped while paused and
+    /// not keeping).
+    func record(kind: UInt8, data: Data) {
+        spool?.append(kind: kind, data: data)
+    }
+
+    /// Play buzzes on the pendant: 1, 2, 3 are 100, 300, 500 ms. The pendant
+    /// plays one at a time, so each waits for the one before plus a gap.
+    func buzz(_ pattern: [UInt8]) {
+        guard let haptic, let peripheral, peripheral.state == .connected else { return }
+        var delay = 0.0
+        for step in pattern {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                peripheral.writeValue(Data([step]), for: haptic, type: .withResponse)
+            }
+            delay += [1: 0.1, 2: 0.3, 3: 0.5][step, default: 0.5] + 0.25
+        }
     }
 
     /// Mute in hardware: mic gain 0, saved on the pendant, so it holds out of
@@ -173,10 +197,11 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
         codec = nil
         gain = nil
         storage = nil
+        haptic = nil
         storageNotifying = false
         endDownload()
         peripheral.discoverServices([Self.audioService, Self.buttonService, Self.timeService, Self.settingsService,
-                                      Self.storageService])
+                                      Self.storageService, Self.hapticService])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
@@ -221,6 +246,8 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
             case Self.storageControl:
                 storage = characteristic
                 peripheral.setNotifyValue(true, for: characteristic)
+            case Self.hapticWrite:
+                haptic = characteristic
             default:
                 break
             }
@@ -236,6 +263,7 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
         case Self.buttonEvent:
             spool?.append(kind: Spool.button, data: value)
             taps += 1
+            if let event = value.first { onButton?(event) }
         case Self.audioCodec:
             log.info("codec \(value.first.map { "\($0)" } ?? "?")")
             codec = value
