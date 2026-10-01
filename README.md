@@ -94,10 +94,12 @@ a staging copy and swaps it in when done, so readers never see a half-built
 database; slow steps are cached by audio content in `db/cache.sqlite`.
 
 To run it now instead of waiting, on the NAS as root (and on the dev box,
-`systemctl --user start hearsay-transcribe`):
+`systemctl --user start hearsay-transcribe`). The lock is the cron job's:
+two runs at once share a staging database and break each other, so this
+waits for one in progress.
 
 ```sh
-docker compose -f /mnt/storage/hearsay/repo/install/compose.yaml run --rm reprocess
+flock /run/hearsay-reprocess.lock docker compose -f /mnt/storage/hearsay/repo/install/compose.yaml run --rm reprocess
 ```
 
 - `/mnt/storage/hearsay/db/hearsay.sqlite`: parsed payloads. Replaced only if
