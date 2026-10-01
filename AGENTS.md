@@ -83,6 +83,9 @@ record when a Zoom call starts.
 
 - Uploaded like pendant audio, to the same tailnet-only capture receiver
   (`hearsay/capture.py`); any new record kind is added on the NAS first.
+  The app is `mac/` (Swift, installed by `install/mac.sh`); the two channels
+  are mixed on the NAS, and each turn is attributed by which one it's loud
+  on (`CHANNEL_RATIO` in `hearsay/speakers.py`, to check on real calls).
 - Speech on the mic channel is the owner's, by channel; during a call the
   call recording wins over the pendant's.
 - Only the operator's personal Mac; a work machine is never used for capture

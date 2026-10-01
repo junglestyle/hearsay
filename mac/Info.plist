@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.hearsay.mac</string>
+    <key>CFBundleName</key>
+    <string>Hearsay Recorder</string>
+    <key>CFBundleExecutable</key>
+    <string>hearsay-mac</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.4</string>
+    <!-- Menu bar only: no Dock icon, no main window. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Hearsay records your side of calls, and what you say when you start a recording.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Hearsay records the other side of calls you choose to record.</string>
+    <!-- Uploads go to the NAS's capture receiver over plain HTTP on the
+         tailnet, where WireGuard encrypts them. App Transport Security blocks
+         HTTP otherwise, and its per-domain exceptions can't name an IP
+         address; the app only ever connects to HEARSAY_CAPTURE_URL. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+</dict>
+</plist>

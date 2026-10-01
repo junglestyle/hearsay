@@ -38,9 +38,16 @@ Secrets are kept in env files outside the repo.
    that `nas.sh` prints; the token is entered in the app. The phone needs
    Tailscale. The pendant takes one connection at a time, so disconnect it
    from Omi's app.
+7. **The operator's personal Mac, as your user (optional; never a work
+   machine):** [`install/mac.sh`](install/mac.sh) builds the menu-bar
+   recorder and starts it at login. It records the mic and system audio as
+   two channels, from the menu or, after asking you, when a Zoom call starts,
+   and uploads to the same capture URL and token as the phone. Recording a
+   call can need everyone's consent where you are. Needs macOS 14.4+.
 
 To update, run `git pull` on every host, then re-run `install/nas.sh` on the
-NAS, `install/gpu.sh` on the dev box and `install/ios.sh` on the Mac. With a
+NAS, `install/gpu.sh` on the dev box, and `install/ios.sh` and
+`install/mac.sh` on the Mac. With a
 free Apple ID the phone's install expires after 7 days; re-running
 `install/ios.sh` renews it.
 
@@ -81,6 +88,17 @@ resume; mute or unmute; or nothing. Each confirms with its own buzz. Single
 tap defaults to keep, double tap to pause. Holding the button 3 s turns the
 pendant off. The NAS must be updated before the
 app whenever the upload format changes, as the update order above does.
+
+## Recording on the Mac
+
+The menu-bar recorder (`mac/`, installed by `install/mac.sh`) records the
+mic and system audio as separate channels: Record and Stop in its menu tap
+all system audio; when Zoom opens the mic for a call it asks first, then taps
+Zoom only and stops when the call ends. Where a Mac recording and the pendant
+overlap, the Mac's wins. A turn loud on the mic and quiet on the call is
+yours, the reverse someone else's (basis `channel` in the stream). Log:
+`~/Library/Logs/hearsay-mac.log`. The NAS must be updated before the Mac app
+whenever the upload format changes.
 
 ## Reprocessing
 
