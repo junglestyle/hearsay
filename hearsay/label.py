@@ -53,7 +53,7 @@ WHERE ts.embedding IS NOT NULL
 
 # Turns that took their label from their diarized speaker (hearsay/speakers.py).
 INHERITED_SQL = """
-SELECT t.turn_id, t.conversation_id, t.start, t.end, ts.label, ca.wav_file, ca.zero_at
+SELECT t.turn_id, t.conversation_id, t.start, t.end, t.text, ts.label, ca.wav_file, ca.zero_at
 FROM turn_speakers ts
 JOIN turns t ON t.turn_id = ts.turn_id
 JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id
@@ -142,7 +142,10 @@ def pick(unlabeled: list[dict]) -> dict:
 
 def ask(turn: dict) -> str | None:
     """Play a turn and return the operator's label, or None to stop."""
-    print(f"\n{turn['end'] - turn['start']:.1f} s")
+    # The transcript shows which words the turn covers; it says nothing of
+    # whose voice the model heard, so labeling stays blind.
+    text = f"  {turn['text'].strip()!r}" if turn.get("text") else ""
+    print(f"\n{turn['end'] - turn['start']:.1f} s{text}")
     play(turn)
     answer = ""
     while answer not in ANSWERS and answer != "s":
