@@ -25,7 +25,10 @@ services:
     pull_policy: never
     container_name: hearsay-portal
     user: "568:568"
-    env_file: /mnt/storage/hearsay/config/portal.env
+    # capture.env too: the iPhone app logs in with the capture token.
+    env_file:
+      - /mnt/storage/hearsay/config/portal.env
+      - /mnt/storage/hearsay/config/capture.env
     environment:
       HEARSAY_DB: /data/db/hearsay.sqlite
       HEARSAY_AUDIO_DIR: /data/audio

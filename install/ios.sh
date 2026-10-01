@@ -138,12 +138,18 @@ if [ -z "$url" ]; then
 fi
 echo "Checking the NAS answers at $url"
 wait_for_401 "$url" 10
+# The naming portal runs on the same NAS address (install/compose.yaml).
+portal="${url%:"$NAS_CAPTURE_PORT"/*}:$NAS_PORTAL_PORT"
+echo "Checking the portal answers at $portal"
+wait_for_status GET "$portal/login" 200 10
 cat <<MSG
 The phone needs Tailscale on (the Tailscale app, connected) to reach the NAS.
-In the Hearsay app, under Capture receiver, enter:
-  URL:    $url
-  Token:  on the NAS: sudo sed -n 's/^HEARSAY_CAPTURE_TOKEN=//p' $NAS_CAPTURE_ENV
+In the Hearsay app, under Recorder > Server, enter:
+  Capture URL:  $url
+  Token:        on the NAS: sudo sed -n 's/^HEARSAY_CAPTURE_TOKEN=//p' $NAS_CAPTURE_ENV
+  Portal URL:   $portal
 Then tap Save. The token is kept in the phone's Keychain, not on this Mac.
+The Voices tab shows the portal, logged in with the capture token.
 MSG
 confirm "Saved?"
 

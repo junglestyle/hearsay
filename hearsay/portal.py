@@ -3,6 +3,9 @@
 Listens only on the LAN and tailnet addresses (install/compose.yaml), never
 through the Cloudflare tunnel. Login is a plain HTML form, not an HTTP auth
 dialog, so password managers can fill it; sessions are HMAC-signed cookies.
+The iPhone app logs in instead with the capture token it already holds
+(POST /login/app, bearer): the portal shows in its Voices tab, and whoever
+holds that token can already send Hearsay audio.
 
 Names are written to labels/tags.jsonl, the same durable input reprocess
 reads, with the time spans of the turns heard so they survive
@@ -118,7 +121,8 @@ def samples(turns: list[dict]) -> list[dict]:
     return picked[:SAMPLES]
 
 
-def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, password: str, session_key: str) -> FastAPI:
+def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, password: str, session_key: str,
+               app_token: str = "") -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     tags_path = labels_dir / "tags.jsonl"
 
@@ -197,6 +201,17 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         if not (user_ok and password_ok):
             await asyncio.sleep(1)  # slows guessing
             return login_page("Wrong username or password.")
+        return session()
+
+    @app.post("/login/app")
+    async def app_login(request: Request) -> Response:
+        sent = request.headers.get("authorization", "").removeprefix("Bearer ")
+        if not app_token or not hmac.compare_digest(sent.encode(), app_token.encode()):
+            await asyncio.sleep(1)
+            return Response(status_code=401)
+        return session()
+
+    def session() -> Response:
         expires = int(time.time()) + SESSION_SECONDS
         response = RedirectResponse("/", status_code=303)
         response.set_cookie(COOKIE, f"{expires}.{sign(expires)}", max_age=SESSION_SECONDS,
@@ -395,4 +410,6 @@ def app_from_env() -> FastAPI:
         os.environ["HEARSAY_PORTAL_USER"],
         os.environ["HEARSAY_PORTAL_PASSWORD"],
         os.environ["HEARSAY_SESSION_KEY"],
+        # From capture.env (install/compose.yaml); without it, app login is off.
+        os.environ.get("HEARSAY_CAPTURE_TOKEN", ""),
     )

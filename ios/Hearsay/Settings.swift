@@ -8,6 +8,7 @@ import Security
 /// included in backups.
 enum Settings {
     private static let urlKey = "captureURL"
+    private static let portalKey = "portalURL"
     private static let tokenQuery: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: "hearsay",
@@ -29,6 +30,20 @@ enum Settings {
         guard SecItemCopyMatching(query as CFDictionary, &found) == errSecSuccess,
               let data = found as? Data else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// The NAS's naming portal (install/nas.sh prints it), shown in the
+    /// Voices tab.
+    static var portalURL: URL? {
+        UserDefaults.standard.string(forKey: portalKey).flatMap(URL.init(string:))
+    }
+
+    static var portalText: String {
+        UserDefaults.standard.string(forKey: portalKey) ?? ""
+    }
+
+    static func save(portal: String) {
+        UserDefaults.standard.set(portal.trimmingCharacters(in: .whitespacesAndNewlines), forKey: portalKey)
     }
 
     static func save(url: String, token: String) {

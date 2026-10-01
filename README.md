@@ -65,8 +65,9 @@ everything it sends on the phone (in the app's own storage, excluded from
 backups), and uploads it every minute to the capture receiver on the NAS over
 the tailnet. It keeps recording in the background, and iOS relaunches it when
 the pendant comes back in range. If the NAS is unreachable, uploads wait on
-the phone. The app shows the pendant's state, the last minute's packet
-counts, and how many uploads are waiting.
+the phone. The app shows the pendant's state, battery and charging, the last
+minute's packet counts, and how many uploads are waiting, and sets the
+pendant's light (saved on the pendant).
 
 While out of range the pendant records to its own storage; on reconnect the
 app downloads that and uploads it like the rest, and the NAS places it by the
@@ -188,7 +189,8 @@ live audio, the live audio wins. Importing the same file twice does nothing.
 Reprocessing groups not-owner segments into anonymous speaker clusters. Name
 them in the web portal that `nas.sh` starts, at the addresses it prints. It
 listens on the LAN and tailnet only, so from your phone use the tailnet
-address. Each cluster plays a few samples. Type a name (reusing a name merges
+address, or the Hearsay app's Voices tab, which shows the same portal and
+logs in with the app's capture token. Each cluster plays a few samples. Type a name (reusing a name merges
 into that person), mark it as more than one person, or skip it for now: skipped
 clusters move to their own list and come round again after the rest. If you
 can't tell who it is (noise, several voices), skip rather than guess. A named

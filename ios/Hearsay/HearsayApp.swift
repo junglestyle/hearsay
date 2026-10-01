@@ -55,8 +55,13 @@ struct HearsayApp: App {
 
     var body: some Scene {
         WindowGroup {
-            StatusView(pendant: recorder.pendant, pause: recorder.pause, buttons: recorder.buttons,
-                       uploader: recorder.uploader)
+            TabView {
+                StatusView(pendant: recorder.pendant, pause: recorder.pause, buttons: recorder.buttons,
+                           uploader: recorder.uploader)
+                    .tabItem { Label("Recorder", systemImage: "waveform") }
+                VoicesView()
+                    .tabItem { Label("Voices", systemImage: "person.wave.2") }
+            }
         }
     }
 }
@@ -68,18 +73,100 @@ struct StatusView: View {
     @ObservedObject var uploader: Uploader
     @State private var url = Settings.urlText
     @State private var token = ""
+    @State private var portal = Settings.portalText
     @State private var confirmForget = false
+    @State private var led = 50.0
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Pendant") {
-                    Text(pendant.state)
-                    if !pendant.lastMinute.isEmpty {
-                        Text("Last minute: \(pendant.lastMinute)")
+                Section {
+                    HStack {
+                        Circle().fill(pendant.state == "connected" ? Color.green : Color.secondary)
+                            .frame(width: 8, height: 8)
+                        Text(pendant.state)
+                        Spacer()
+                        if let battery = pendant.battery {
+                            Label("\(battery)%", systemImage: batterySymbol(battery))
+                                .labelStyle(.titleAndIcon)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    if !pendant.stored.isEmpty {
-                        Text("Stored while away: \(pendant.stored)")
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !pendant.lastMinute.isEmpty { Text("Last minute: \(pendant.lastMinute)") }
+                        if !pendant.stored.isEmpty { Text("Stored while away: \(pendant.stored)") }
+                        Text("Uploads: \(uploader.pending) waiting, \(uploader.lastResult)")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    HStack(spacing: 12) {
+                        control(pause.paused ? "Resume" : "Pause",
+                                symbol: pause.paused ? "play.fill" : "pause.fill", on: pause.paused) {
+                            if pause.paused { pause.resume() } else { pause.pause() }
+                        }
+                        control(pendant.muted ? "Unmute" : "Mute",
+                                symbol: pendant.muted ? "mic.fill" : "mic.slash.fill", on: pendant.muted) {
+                            pendant.setMuted(!pendant.muted)
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
+                    Toggle("Keep paused audio on this phone", isOn: Binding(get: { pause.keep },
+                                                                            set: { pause.setKeep($0) }))
+                } footer: {
+                    Text(recordingStatus)
+                }
+
+                if !pause.windows.isEmpty {
+                    Section {
+                        ForEach(pause.windows) { window in
+                            NavigationLink {
+                                WindowView(window: window, pause: pause, uploader: uploader)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(timeRange(window))
+                                    Text(details(window)).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .swipeActions {
+                                Button("Delete", role: .destructive) { pause.delete(window) }
+                                Button("Upload") {
+                                    pause.upload(window)
+                                    uploader.drain()
+                                }
+                                .tint(.blue)
+                            }
+                        }
+                    } header: {
+                        Text("Paused audio to review")
+                    } footer: {
+                        Text("Tap to listen and keep a stretch. Swipe to upload or delete all of it.")
+                    }
+                }
+
+                Section("Pendant") {
+                    if pendant.led != nil {
+                        HStack {
+                            Image(systemName: "lightbulb").foregroundStyle(.secondary)
+                            Slider(value: $led, in: 0...100, step: 5) { editing in
+                                if !editing { pendant.setLED(Int(led)) }
+                            }
+                        }
+                        .onAppear { led = Double(pendant.led ?? 50) }
+                        .onChange(of: pendant.led) { _, level in if let level { led = Double(level) } }
+                    }
+                    Picker("Single tap", selection: $buttons.single) {
+                        ForEach(Buttons.Action.allCases) { Text($0.label).tag($0) }
+                    }
+                    Picker("Double tap", selection: $buttons.double) {
+                        ForEach(Buttons.Action.allCases) { Text($0.label).tag($0) }
+                    }
+                    DisclosureGroup("Buzzes") {
+                        Text("Keep: one short. End: one medium. Pause: one long; resume: two short. Mute: two long; unmute: three short. Holding the button 3 s turns the pendant off.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     Button("Use a different pendant", role: .destructive) { confirmForget = true }
                         .confirmationDialog("Forget this pendant and connect to the next one found?",
@@ -87,91 +174,69 @@ struct StatusView: View {
                             Button("Forget", role: .destructive) { pendant.forget() }
                         }
                 }
+
                 Section {
-                    Toggle("Mute the microphone", isOn: Binding(get: { pendant.muted },
-                                                                set: { pendant.setMuted($0) }))
-                } footer: {
-                    Text("Turns the pendant's mic off in hardware. It stays off, even out of range, until unmuted here.")
-                }
-                Section {
-                    Picker("Single tap", selection: $buttons.single) {
-                        ForEach(Buttons.Action.allCases) { Text($0.label).tag($0) }
-                    }
-                    Picker("Double tap", selection: $buttons.double) {
-                        ForEach(Buttons.Action.allCases) { Text($0.label).tag($0) }
-                    }
-                } header: {
-                    Text("Pendant button")
-                } footer: {
-                    Text("Buzzes: keep one short, end one medium; pause one long, resume two short; mute two long, unmute three short. Holding the button 3 s turns the pendant off.")
-                }
-                Section {
-                    Text(pauseStatus)
-                    Button(pause.paused ? "Resume" : "Pause") {
-                        if pause.paused { pause.resume() } else { pause.pause() }
-                    }
-                    Toggle("Keep paused audio on this phone", isOn: Binding(get: { pause.keep },
-                                                                            set: { pause.setKeep($0) }))
-                } header: {
-                    Text("Pause")
-                } footer: {
-                    Text("Paused audio never reaches Hearsay. Kept, it stays on this phone for 30 days, and you can upload a paused stretch until then.")
-                }
-                if !pause.windows.isEmpty {
-                    Section {
-                        ForEach(pause.windows) { window in
-                            NavigationLink(describe(window)) {
-                                WindowView(window: window, pause: pause, uploader: uploader)
-                            }
-                                .swipeActions {
-                                    Button("Delete", role: .destructive) { pause.delete(window) }
-                                    Button("Upload") {
-                                        pause.upload(window)
-                                        uploader.drain()
-                                    }
-                                }
+                    Button("Send uploads now") { uploader.drain() }
+                    DisclosureGroup("Server") {
+                        TextField("http://<nas tailnet ip>:8789/capture", text: $url)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        SecureField(Settings.token == nil ? "Token" : "Token (saved; enter to replace)", text: $token)
+                        TextField("http://<nas tailnet ip>:8788 (naming portal)", text: $portal)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Button("Save") {
+                            Settings.save(url: url, token: token)
+                            Settings.save(portal: portal)
+                            token = ""
+                            uploader.drain()
                         }
-                    } header: {
-                        Text("Paused audio on this phone")
-                    } footer: {
-                        Text("Tap to listen and keep a stretch; swipe to upload or delete all of it.")
                     }
-                }
-                Section("Uploads") {
-                    Text("\(uploader.pending) waiting on the phone")
-                    Text(uploader.lastResult)
-                    Button("Send now") { uploader.drain() }
-                }
-                Section {
-                    TextField("http://<nas tailnet ip>:8789/capture", text: $url)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecureField(Settings.token == nil ? "Token" : "Token (saved; enter to replace)", text: $token)
-                    Button("Save") {
-                        Settings.save(url: url, token: token)
-                        token = ""
-                        uploader.drain()
-                    }
-                } header: {
-                    Text("Capture receiver")
                 } footer: {
-                    Text("install/ios.sh prints both. The phone must be on the tailnet.")
+                    Text("install/ios.sh prints the capture URL, token and portal URL. The phone must be on the tailnet.")
                 }
             }
             .navigationTitle("Hearsay")
         }
     }
 
-    private var pauseStatus: String {
-        guard pause.paused else { return "Recording" }
-        return pause.keep ? "Paused: keeping it on this phone only" : "Paused: dropping it as it arrives"
+    /// A large toggle-like button; filled while its state is on.
+    private func control(_ title: String, symbol: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                Text(title)
+            }
+            .frame(maxWidth: .infinity, minHeight: 36)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(on ? .orange : .accentColor)
     }
 
-    private func describe(_ window: Pause.Window) -> String {
-        let start = window.start.formatted(date: .abbreviated, time: .shortened)
-        let end = window.end.formatted(date: .omitted, time: .shortened)
+    private var recordingStatus: String {
+        let mic = pendant.muted ? "Mic muted on the pendant, even out of range." : ""
+        guard pause.paused else { return pendant.muted ? mic : "Recording. Paused audio never reaches Hearsay." }
+        let paused = pause.keep ? "Paused: kept on this phone for 30 days." : "Paused: dropped as it arrives."
+        return [paused, mic].filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    private func batterySymbol(_ level: Int) -> String {
+        if pendant.isCharging == true { return "battery.100.bolt" }
+        return "battery.\([0, 25, 50, 75, 100].min { abs($0 - level) < abs($1 - level) }!)"
+    }
+
+    private func timeRange(_ window: Pause.Window) -> String {
+        let start = window.start.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        return "\(start) – \(window.end.formatted(date: .omitted, time: .shortened))"
+    }
+
+    private func details(_ window: Pause.Window) -> String {
+        let length = Duration.seconds(window.end.timeIntervalSince(window.start))
+            .formatted(.units(allowed: [.hours, .minutes, .seconds], width: .narrow, maximumUnitCount: 2))
         let size = ByteCountFormatter.string(fromByteCount: Int64(window.bytes), countStyle: .file)
-        return "\(start) – \(end), \(size)"
+        let expires = window.end.addingTimeInterval(Pause.retention).formatted(.dateTime.month(.abbreviated).day())
+        return "\(length), \(size), deleted \(expires)"
     }
 }

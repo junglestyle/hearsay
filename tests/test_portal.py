@@ -52,7 +52,7 @@ def portal(tmp_path):
     db.close()
     reprocess_people(db_path, labels_dir)
 
-    app = create_app(db_path, audio_dir, labels_dir, "me", "correct horse", "k" * 64)
+    app = create_app(db_path, audio_dir, labels_dir, "me", "correct horse", "k" * 64, app_token="capture-token")
     return TestClient(app), db_path, labels_dir
 
 
@@ -78,6 +78,16 @@ def test_nothing_is_reachable_without_logging_in(portal):
 
     client.cookies.clear()
     assert log_in(client).status_code == 303
+    assert client.get("/", follow_redirects=False).status_code == 200
+
+
+def test_the_app_logs_in_with_the_capture_token(portal):
+    client, _, _ = portal
+    for wrong in ({}, {"Authorization": "Bearer nope"}):
+        response = client.post("/login/app", headers=wrong, follow_redirects=False)
+        assert response.status_code == 401 and "set-cookie" not in response.headers
+    response = client.post("/login/app", headers={"Authorization": "Bearer capture-token"}, follow_redirects=False)
+    assert response.status_code == 303
     assert client.get("/", follow_redirects=False).status_code == 200
 
 

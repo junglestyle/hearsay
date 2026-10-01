@@ -20,7 +20,11 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     static let timeService = CBUUID(string: "19B10030-E8F2-537E-4F6C-D104768A1214")
     static let timeWrite = CBUUID(string: "19B10031-E8F2-537E-4F6C-D104768A1214")
     static let settingsService = CBUUID(string: "19B10010-E8F2-537E-4F6C-D104768A1214")
+    static let ledBrightness = CBUUID(string: "19B10011-E8F2-537E-4F6C-D104768A1214")
     static let micGain = CBUUID(string: "19B10012-E8F2-537E-4F6C-D104768A1214")
+    static let charging = CBUUID(string: "19B10013-E8F2-537E-4F6C-D104768A1214")
+    static let batteryService = CBUUID(string: "180F")
+    static let batteryLevel = CBUUID(string: "2A19")
     static let storageService = CBUUID(string: "30295780-4301-EABD-2904-2849ADFEAE43")
     static let storageControl = CBUUID(string: "30295781-4301-EABD-2904-2849ADFEAE43")
     static let hapticService = CBUUID(string: "CAB1AB95-2EA5-4F4D-BB56-874B72CFC984")
@@ -38,6 +42,10 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     /// What the operator asked for; applied whenever the pendant is connected.
     @Published private(set) var muted = UserDefaults.standard.bool(forKey: Pendant.mutedKey)
     @Published private(set) var stored = ""
+    /// As the pendant reports them; nil until read on this connection.
+    @Published private(set) var battery: Int?
+    @Published private(set) var isCharging: Bool?
+    @Published private(set) var led: Int?
 
     /// Decides where downloaded audio goes; set by Pause.
     weak var pause: Pause?
@@ -52,6 +60,7 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     private var gain: CBCharacteristic?
     private var storage: CBCharacteristic?
     private var haptic: CBCharacteristic?
+    private var ledCharacteristic: CBCharacteristic?
     private var storageNotifying = false
     private var downloading = false
     // The transfer in progress: the next packet's sequence number on the
@@ -87,6 +96,14 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     /// not keeping).
     func record(kind: UInt8, data: Data) {
         spool?.append(kind: kind, data: data)
+    }
+
+    /// The LED's brightness, 0–100. The pendant saves it and applies it at
+    /// once.
+    func setLED(_ level: Int) {
+        guard let ledCharacteristic, let peripheral, peripheral.state == .connected else { return }
+        led = min(max(level, 0), 100)
+        peripheral.writeValue(Data([UInt8(led!)]), for: ledCharacteristic, type: .withResponse)
     }
 
     /// Play buzzes on the pendant: 1, 2, 3 are 100, 300, 500 ms. The pendant
@@ -198,10 +215,14 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
         gain = nil
         storage = nil
         haptic = nil
+        ledCharacteristic = nil
+        battery = nil
+        isCharging = nil
+        led = nil
         storageNotifying = false
         endDownload()
         peripheral.discoverServices([Self.audioService, Self.buttonService, Self.timeService, Self.settingsService,
-                                      Self.storageService, Self.hapticService])
+                                      Self.storageService, Self.hapticService, Self.batteryService])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
@@ -248,6 +269,12 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
                 peripheral.setNotifyValue(true, for: characteristic)
             case Self.hapticWrite:
                 haptic = characteristic
+            case Self.ledBrightness:
+                ledCharacteristic = characteristic
+                peripheral.readValue(for: characteristic)
+            case Self.batteryLevel, Self.charging:
+                peripheral.readValue(for: characteristic)
+                peripheral.setNotifyValue(true, for: characteristic)
             default:
                 break
             }
@@ -275,6 +302,12 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
             if let level = value.first { reconcile(level, peripheral, characteristic) }
         case Self.storageControl:
             storageNotified(value)
+        case Self.batteryLevel:
+            battery = value.first.map(Int.init)
+        case Self.charging:
+            isCharging = value.first.map { $0 != 0 }
+        case Self.ledBrightness:
+            led = value.first.map(Int.init)
         default:
             break
         }
@@ -309,6 +342,8 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
         switch characteristic.uuid {
         case Self.timeWrite:
             if let error { log.error("setting the pendant's clock failed: \(error)") }
+        case Self.ledBrightness:
+            if let error { log.error("setting the pendant's LED failed: \(error)") }
         case Self.micGain:
             if let error {
                 log.error("setting the pendant's mic gain failed: \(error)")
