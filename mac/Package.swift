@@ -5,7 +5,8 @@ import PackageDescription
 // macOS asks for mic and system audio access on behalf of the bundle.
 let package = Package(
     name: "hearsay-mac",
-    platforms: [.macOS("14.4")]  // process taps (14.2) and per-process input state (14.4),
+    // Process taps need 14.2, per-process input state (Zoom detection) 14.4.
+    platforms: [.macOS("14.4")],
     targets: [
         .executableTarget(name: "hearsay-mac", path: "Sources"),
     ]
