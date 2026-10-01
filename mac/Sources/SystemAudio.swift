@@ -57,7 +57,7 @@ final class SystemAudio {
     func start(processes: [AudioObjectID], into channel: Channel) throws {
         let description = processes.isEmpty
             ? CATapDescription(stereoGlobalTapButExcludeProcesses: [])
-            : CATapDescription(stereoMixdownOfProcesses: processes.map { NSNumber(value: $0) })
+            : CATapDescription(stereoMixdownOfProcesses: processes)
         description.uuid = UUID()
         description.muteBehavior = .unmuted
         var status = AudioHardwareCreateProcessTap(description, &tap)
