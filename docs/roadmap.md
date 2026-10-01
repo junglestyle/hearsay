@@ -116,7 +116,21 @@ Protocol details come from Omi's open-source firmware (MIT).
 Done when: a day of capture reaches Hearsay from the phone with Omi's cloud
 out of the loop, including a stretch out of range and a paused stretch.
 
-## 10. Mac audio capture
+## 10. Every turn attributed
+
+Turns too short to embed (under 2.5 s), or scoring between the owner and
+not-owner thresholds, have no speaker: 18% of speech time on 2026-10-01.
+Within a conversation the diarizer already groups each turn with a speaker,
+and that speaker's voice-labeled turns agree almost always (51 of 53 at 90%
+or more). An unlabeled turn takes its diarized speaker's label (owner or not,
+and through the speaker's cluster, the person's name) when that speaker's
+labeled turns agree; the stream says the basis was diarization. Checked by
+ear on a random sample of inherited turns (`hearsay-label check`).
+
+Done when: under 5% of speech time has no speaker, and inherited labels hold
+up by ear at 95% precision or better.
+
+## 11. Mac audio capture
 
 A menu-bar app on the operator's personal Mac (no pendant) that captures the
 mic (including AirPods) and system audio as separate channels: run/stop from
@@ -128,7 +142,7 @@ everyone's consent depending on jurisdiction.
 Done when: a Zoom call's utterances reach the stream with the owner
 attributed by channel, started automatically.
 
-## 11. Retention
+## 12. Retention
 
 Delete non-owner audio after embedding and transcription. Starts only
 once tagging is reliable: until then all audio is kept, because deleted

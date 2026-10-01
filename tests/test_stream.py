@@ -11,7 +11,8 @@ from hearsay.turns import SCHEMA as TURNS_SCHEMA
 
 T = 1_790_000_000.0  # unix seconds; conversation c1's WAV starts here
 
-# (text, diarized voice, owner/not_owner label, owner similarity, person, cluster)
+# (text, diarized voice, owner/not_owner label, owner similarity, person, cluster);
+# a label is by voice unless the text says inherited.
 TURNS = [
     ("mine", "S0", "owner", 0.71, None, None),
     ("scott's", "S1", "not_owner", 0.05, "Scott", "k1"),
@@ -21,6 +22,7 @@ TURNS = [
     ("a cashier", "S4", "not_owner", 0.11, "_stranger", "k4"),
     ("a car alarm", None, "not_owner", 0.01, "_noise", "k5"),
     ("too short to tell", "S0", None, 0.25, None, None),
+    ("yeah (inherited)", "S2", "not_owner", None, None, "k2"),
 ]
 
 
@@ -34,7 +36,8 @@ def build(tmp_path):
     for idx, (text, voice, label, similarity, person, cluster) in enumerate(TURNS):
         turn_id = f"c1:{idx:04d}"
         db.execute("INSERT INTO turns VALUES (?, 'c1', ?, ?, ?, ?, ?, 0.8)", (turn_id, idx, 10.0 * idx, 10.0 * idx + 5, text, voice))
-        db.execute("INSERT INTO turn_speakers VALUES (?, 'c1', 1, NULL, ?, ?)", (turn_id, similarity, label))
+        basis = "diarization" if "inherited" in text else "voice" if label else None
+        db.execute("INSERT INTO turn_speakers VALUES (?, 'c1', 1, NULL, ?, ?, ?)", (turn_id, similarity, label, basis))
         if cluster:
             db.execute("INSERT INTO turn_people VALUES (?, ?, ?, 0)", (turn_id, cluster, person))
     db.commit()
@@ -50,7 +53,7 @@ def read(stream_dir):
 
 def test_stream_attributes_speakers_and_leaves_out_non_speech(tmp_path):
     db_path, stream_dir = build(tmp_path), tmp_path / "stream"
-    assert write_stream(db_path, stream_dir) == {"conversations": 2, "transcribed": 1, "utterances": 7}
+    assert write_stream(db_path, stream_dir) == {"conversations": 2, "transcribed": 1, "utterances": 8}
     index, utterances = read(stream_dir)
 
     assert [(u["text"], u["speaker"]["kind"], u["speaker"]["name"], u["speaker"]["label"]) for u in utterances] == [
@@ -61,11 +64,13 @@ def test_stream_attributes_speakers_and_leaves_out_non_speech(tmp_path):
         ("first anon again", "anonymous", None, "anon A"),
         ("a cashier", "stranger", None, "stranger A"),
         ("too short to tell", "unknown", None, None),
+        ("yeah (inherited)", "anonymous", None, "anon A"),
     ]
     assert utterances[0]["start"] == "2026-09-21T14:13:20.000Z" and utterances[1]["end"] == "2026-09-21T14:13:35.000Z"
     assert utterances[0]["speaker_confidence"] == {"basis": "voice", "owner_similarity": 0.71}
+    assert utterances[7]["speaker_confidence"] == {"basis": "diarization", "owner_similarity": None}
     assert [(e["conversation_id"], e["transcribed"], e["open"], e["utterances"]) for e in index] == [
-        ("c1", True, False, 7), ("c2", False, True, 0)]
+        ("c1", True, False, 8), ("c2", False, True, 0)]
 
 
 def test_revisions_change_only_when_a_conversation_does(tmp_path):

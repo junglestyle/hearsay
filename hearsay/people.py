@@ -22,7 +22,7 @@ CLUSTER_THRESHOLD = 0.40
 
 SCHEMA = """
 DROP TABLE IF EXISTS turn_people;
--- One row per turn labeled not_owner.
+-- One row per turn labeled not_owner, by voice or inherited by diarization.
 CREATE TABLE turn_people (
     turn_id TEXT PRIMARY KEY REFERENCES turns(turn_id),
     cluster TEXT NOT NULL,           -- smallest turn_id in the cluster; changes as data grows
@@ -73,17 +73,30 @@ def group_people(db_path: Path) -> dict:
     db = sqlite3.connect(db_path)
     try:
         names = dict(db.execute("SELECT turn_id, value FROM operator_input WHERE kind = 'name'"))
-        # Only turns already labeled not_owner: the owner's voice never joins a
-        # cluster, even when diarization lumps it in with someone else's.
+        # Only turns labeled not_owner by voice: the owner's voice never joins
+        # a cluster, even when diarization lumps it in with someone else's.
         rows = db.execute(
             "SELECT ts.turn_id, t.conversation_id, t.diar_speaker, ts.embedding FROM turn_speakers ts"
-            " JOIN turns t ON t.turn_id = ts.turn_id WHERE ts.label = 'not_owner' ORDER BY ts.turn_id"
+            " JOIN turns t ON t.turn_id = ts.turn_id WHERE ts.label = 'not_owner' AND ts.basis = 'voice'"
+            " ORDER BY ts.turn_id"
         ).fetchall()
         speakers, vectors = speaker_vectors(rows)
 
         members = {}
+        speaker_cluster = {}
+        diarized = {turn_id: (conversation_id, diar_speaker) for turn_id, conversation_id, diar_speaker, _ in rows}
         for turn_ids, c in zip(speakers, cluster(vectors)):
             members.setdefault(c, []).extend(turn_ids)
+            speaker_cluster.setdefault(diarized[turn_ids[0]], c)
+        # Turns that inherited not_owner from their diarized speaker join that
+        # speaker's cluster, and so its name.
+        for turn_id, conversation_id, diar_speaker in db.execute(
+            "SELECT ts.turn_id, t.conversation_id, t.diar_speaker FROM turn_speakers ts"
+            " JOIN turns t ON t.turn_id = ts.turn_id WHERE ts.label = 'not_owner' AND ts.basis = 'diarization'"
+        ):
+            c = speaker_cluster.get((conversation_id, diar_speaker))
+            if c is not None:
+                members[c].append(turn_id)
 
         out = []
         for turn_ids in members.values():

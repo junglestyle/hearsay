@@ -46,8 +46,8 @@ def portal(tmp_path):
         db.execute("INSERT INTO turns VALUES (?,?,?,?,?,?,?,?)",
                    (turn_id, "c1", idx, 5.0 * idx, 5.0 * idx + 4, "synthetic", None, None))
         vector = unit([x + rng.gauss(0, 0.04) for x in voices[idx % 2]])
-        db.execute("INSERT INTO turn_speakers VALUES (?,?,?,?,?,?)",
-                   (turn_id, "c1", 1.0, array("f", vector).tobytes(), 0.0, "not_owner"))
+        db.execute("INSERT INTO turn_speakers VALUES (?,?,?,?,?,?,?)",
+                   (turn_id, "c1", 1.0, array("f", vector).tobytes(), 0.0, "not_owner", "voice"))
     db.commit()
     db.close()
     reprocess_people(db_path, labels_dir)

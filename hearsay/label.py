@@ -13,6 +13,7 @@ appended to the labels dir on the NAS and never rebuilt or overwritten.
     python -m hearsay.label import FILE START  # add audio the live stream missed
     python -m hearsay.label                    # label turns me / not me, blind
     python -m hearsay.label review             # re-hear labels the model disagrees with
+    python -m hearsay.label check              # label turns labeled by diarization, blind
     python -m hearsay.label report             # precision/recall, cluster health
 
 START and END are ISO-8601 times, e.g. 2026-09-27T10:05 or "2026-09-27 10:05";
@@ -31,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hearsay.people import CLUSTER_THRESHOLD
-from hearsay.speakers import NOT_OWNER_THRESHOLD, OWNER_THRESHOLD
+from hearsay.speakers import DIARIZATION_AGREEMENT, NOT_OWNER_THRESHOLD, OWNER_THRESHOLD
 from hearsay.turns import wall
 
 NAS = "nas"
@@ -48,6 +49,21 @@ FROM turn_speakers ts
 JOIN turns t ON t.turn_id = ts.turn_id
 JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id
 WHERE ts.embedding IS NOT NULL
+"""
+
+# Turns that took their label from their diarized speaker (hearsay/speakers.py).
+INHERITED_SQL = """
+SELECT t.turn_id, t.conversation_id, t.start, t.end, ts.label, ca.wav_file, ca.zero_at
+FROM turn_speakers ts
+JOIN turns t ON t.turn_id = ts.turn_id
+JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id
+WHERE ts.basis = 'diarization'
+"""
+
+# Speech time by how its speaker was decided.
+COVERAGE_SQL = """
+SELECT coalesce(ts.basis, 'unlabeled') AS basis, sum(t.end - t.start) AS seconds
+FROM turn_speakers ts JOIN turns t ON t.turn_id = ts.turn_id GROUP BY 1
 """
 
 # The operator's labels and tags as reprocess matched them to turns.
@@ -195,6 +211,23 @@ def label_loop() -> None:
         unlabeled.remove(turn)
 
 
+def check_loop() -> None:
+    """Label turns that inherited their label, in random order, to measure
+    how often inheriting is right. The inherited label isn't shown."""
+    labeled = existing_labels()
+    unchecked = [t for t in query(INHERITED_SQL) if t["turn_id"] not in labeled]
+    random.shuffle(unchecked)
+    print(f"{len(unchecked)} turns labeled by diarization and not yet by ear.")
+    print("m = me, n = not me, u = unsure, s = skip, r = replay, q = quit")
+    for turn in unchecked:
+        answer = ask(turn)
+        if answer is None:
+            break
+        if answer != "skip":
+            save_label(turn, answer)
+    print("\nReprocess on the NAS, then run `report`.")
+
+
 def enroll(start: str, end: str) -> None:
     window = {
         "start": datetime.fromisoformat(start).astimezone(timezone.utc).isoformat(),
@@ -259,7 +292,29 @@ def report() -> None:
         t_owner, t_not = 0.3 + i * 0.05, 0.1 + i * 0.04
         print(f"{line(rows, 'owner', lambda sim: sim >= t_owner, t_owner)}   "
               f"{line(rows, 'not_owner', lambda sim: sim <= t_not, t_not)}")
+    inheritance_report(labeled)
     cluster_report()
+
+
+def inheritance_report(labeled: dict[str, str]) -> None:
+    try:
+        seconds = {row["basis"]: row["seconds"] or 0 for row in query(COVERAGE_SQL)}
+        inherited = query(INHERITED_SQL)
+    except subprocess.CalledProcessError:
+        print("\nno diarization labels yet (reprocess with this code first)")
+        return
+    total = sum(seconds.values()) or 1
+    print(f"\nspeech time by basis: " + ", ".join(f"{basis} {s / total:.0%}" for basis, s in sorted(seconds.items())))
+    checked = [(t["label"], labeled[t["turn_id"]]) for t in inherited
+               if labeled.get(t["turn_id"]) in ("owner", "not_owner")]
+    right = sum(1 for got, heard in checked if got == heard)
+    print(f"labeled by diarization (agreement {DIARIZATION_AGREEMENT}): {len(inherited)} turns, "
+          f"{len(checked)} checked by ear, precision {right / len(checked):.2f}" if checked else
+          f"labeled by diarization: {len(inherited)} turns, none checked by ear yet (run `check`)")
+    for label in ("owner", "not_owner"):
+        mine = [heard for got, heard in checked if got == label]
+        if mine:
+            print(f"  {label}: {sum(1 for h in mine if h == label)}/{len(mine)} right")
 
 
 def cluster_report() -> None:
@@ -307,6 +362,8 @@ def main() -> None:
         report()
     elif sys.argv[1:] == ["review"]:
         review_loop()
+    elif sys.argv[1:] == ["check"]:
+        check_loop()
     elif not sys.argv[1:]:
         label_loop()
     else:

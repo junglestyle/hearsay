@@ -23,7 +23,7 @@ from pathlib import Path
 
 UTTERANCES_SQL = """
 SELECT t.conversation_id, t.idx, t.start, t.end, t.text, t.diar_speaker, t.confidence,
-       ts.label, ts.owner_similarity, tp.person, tp.cluster, ca.zero_at
+       ts.label, ts.basis, ts.owner_similarity, tp.person, tp.cluster, ca.zero_at
 FROM turns t
 JOIN turn_speakers ts ON ts.turn_id = t.turn_id
 LEFT JOIN turn_people tp ON tp.turn_id = t.turn_id
@@ -36,13 +36,24 @@ def iso(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def speaker_kind(label: str | None, person: str | None) -> tuple[str, str | None, str] | None:
+def speaker_kind(label: str | None, person: str | None, basis: str | None) -> tuple[str, str | None, str] | None:
     """(kind, name, basis), or None for turns left out of the stream.
 
     Names starting with "_" are the operator's categories, not people.
     _stranger is someone present, so it stays; every other category (_noise,
     _media) is not speech from anyone present and is left out.
+
+    A turn labeled by its diarized speaker rather than its own voice
+    (hearsay/speakers.py) says so: its basis is "diarization", whatever the
+    kind.
     """
+    found = speaker_from_label(label, person)
+    if found and basis == "diarization":
+        return found[0], found[1], "diarization"
+    return found
+
+
+def speaker_from_label(label: str | None, person: str | None) -> tuple[str, str | None, str] | None:
     if label == "owner":
         return "owner", None, "voice"
     if person and person.startswith("_"):
@@ -68,8 +79,8 @@ def utterances(db: sqlite3.Connection) -> dict[str, list[dict]]:
     by_conversation = {}
     labels = {}  # (conversation, kind, voice) -> "anon A" / "stranger A"
     for (conversation_id, idx, start, end, text, diar_speaker, confidence,
-         label, similarity, person, cluster, zero_at) in db.execute(UTTERANCES_SQL):
-        speaker = speaker_kind(label, person)
+         label, basis, similarity, person, cluster, zero_at) in db.execute(UTTERANCES_SQL):
+        speaker = speaker_kind(label, person, basis)
         if speaker is None:
             continue
         kind, name, basis = speaker

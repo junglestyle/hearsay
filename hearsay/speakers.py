@@ -5,9 +5,11 @@ operator's enrollment windows in the labels dir. Turn audio is cut from the
 stream at the conversation's zero point, which is where its WAV starts, so
 turn coverage is exact.
 
-Tuned for precision: a turn is labeled only when its similarity to the
-owner's enrolled voice is clearly high or clearly low. Everything in between,
-and anything too short or missing audio, stays unlabeled.
+Tuned for precision: a turn is labeled by voice only when its similarity to
+the owner's enrolled voice is clearly high or clearly low. A turn left
+unlabeled (too short to embed, or in between) then takes the label of its
+diarized speaker in the same conversation, when that speaker's voice-labeled
+turns agree (DIARIZATION_AGREEMENT); otherwise it stays unlabeled.
 """
 
 import json
@@ -33,6 +35,11 @@ ENROLLMENT_PIECE = 3.0
 # Cosine similarity to the owner's enrolled voice.
 OWNER_THRESHOLD = 0.40
 NOT_OWNER_THRESHOLD = 0.14
+# Share of a diarized speaker's voice-labeled seconds that must carry one
+# label before its unlabeled turns take it. On real data (2026-10-01), 51 of
+# 53 diarized speakers with labeled turns were at least 90% one label, and
+# inheriting cut unlabeled speech from 18% to 2%.
+DIARIZATION_AGREEMENT = 0.9
 
 SCHEMA = """
 DROP TABLE IF EXISTS turn_speakers;
@@ -44,7 +51,8 @@ CREATE TABLE turn_speakers (
     coverage REAL NOT NULL,          -- fraction of the turn with received audio
     embedding BLOB,                  -- float32 x 192, NULL if too short or too little audio
     owner_similarity REAL,           -- cosine similarity to the enrolled owner voice
-    label TEXT                       -- owner | not_owner | NULL (ambiguous or unknown)
+    label TEXT,                      -- owner | not_owner | NULL (ambiguous or unknown)
+    basis TEXT                       -- voice | diarization (inherited) | NULL when unlabeled
 );
 CREATE TABLE owner_enrollment (
     start TEXT NOT NULL,
@@ -156,11 +164,39 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
                     if label:
                         counts[label] += 1
             db.execute(
-                "INSERT INTO turn_speakers VALUES (?,?,?,?,?,?)",
-                (turn_id, conversation_id, coverage, embedding, similarity, label),
+                "INSERT INTO turn_speakers VALUES (?,?,?,?,?,?,?)",
+                (turn_id, conversation_id, coverage, embedding, similarity, label, "voice" if label else None),
             )
+        counts.update(inherit_labels(db))
         db.commit()
     finally:
         db.close()
     counts["enrolled"] = owner is not None
     return counts
+
+
+def inherit_labels(db: sqlite3.Connection) -> dict:
+    """Label unlabeled turns from their diarized speaker's voice-labeled turns.
+
+    Within a conversation the diarizer tells voices apart well, even on turns
+    too short to embed; it's the embedding that says whose voice it is. A
+    speaker whose labeled turns disagree passes nothing on.
+    """
+    rows = db.execute(
+        "SELECT ts.turn_id, t.conversation_id, t.diar_speaker, t.end - t.start, ts.label"
+        " FROM turn_speakers ts JOIN turns t ON t.turn_id = ts.turn_id WHERE t.diar_speaker IS NOT NULL"
+    ).fetchall()
+    seconds = {}
+    for _, conversation_id, speaker, duration, label in rows:
+        if label:
+            by_label = seconds.setdefault((conversation_id, speaker), {})
+            by_label[label] = by_label.get(label, 0.0) + duration
+    agreed = {}
+    for key, by_label in seconds.items():
+        label, top = max(by_label.items(), key=lambda item: item[1])
+        if top >= DIARIZATION_AGREEMENT * sum(by_label.values()):
+            agreed[key] = label
+    inherited = [(agreed[(c, s)], turn_id) for turn_id, c, s, _, label in rows if not label and (c, s) in agreed]
+    db.executemany("UPDATE turn_speakers SET label = ?, basis = 'diarization' WHERE turn_id = ?", inherited)
+    return {"inherited_owner": sum(1 for label, _ in inherited if label == "owner"),
+            "inherited_not_owner": sum(1 for label, _ in inherited if label == "not_owner")}

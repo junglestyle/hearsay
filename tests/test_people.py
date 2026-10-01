@@ -40,10 +40,12 @@ def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
     turns += [(f"c{i}", "c2", "carol1", "not_owner") for i in range(3)]
     turns += [(f"d{i}", "c3", "carol2", "not_owner") for i in range(3)]
     turns += [("m0", "c1", "me", "owner")]
-    # One diarized speaker in c4: a clear Alice turn and one too noisy to place alone.
-    turns += [("s0", "c4", "alice", "not_owner"), ("s1", "c4", "noise", "not_owner")]
+    # One diarized speaker in c4: a clear Alice turn, one too noisy to place
+    # alone, and one too short to embed that inherited not_owner from them.
+    turns += [("s0", "c4", "alice", "not_owner"), ("s1", "c4", "noise", "not_owner"),
+              ("s2", "c4", None, "not_owner")]
     voices["noise"] = unit([rng.gauss(0, 1) for _ in range(192)])
-    diarized = {"s0": "SPEAKER_00", "s1": "SPEAKER_00"}
+    diarized = {"s0": "SPEAKER_00", "s1": "SPEAKER_00", "s2": "SPEAKER_00"}
     start = {turn_id: 5.0 * i for i, (turn_id, *_) in enumerate(turns)}
 
     db_path, labels_dir = tmp_path / "h.sqlite", tmp_path / "labels"
@@ -56,8 +58,9 @@ def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
         db.execute("INSERT INTO turns VALUES (?,?,?,?,?,?,?,?)",
                    (turn_id, conversation, idx, start[turn_id], start[turn_id] + 4, "synthetic",
                     diarized.get(turn_id), None))
-        db.execute("INSERT INTO turn_speakers VALUES (?,?,?,?,?,?)",
-                   (turn_id, conversation, 1.0, array("f", near(voice)).tobytes(), 0.0, label))
+        embedding = array("f", near(voice)).tobytes() if voice else None
+        db.execute("INSERT INTO turn_speakers VALUES (?,?,?,?,?,?,?)",
+                   (turn_id, conversation, 1.0, embedding, 0.0, label, "voice" if voice else "diarization"))
     db.commit()
     db.close()
 
@@ -84,10 +87,11 @@ def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
     assert "m0" not in person
     assert {person[f"a{i}"] for i in range(7)} == {"Alice"}
     assert person["s0"] == person["s1"] == "Alice"  # the speaker's turns cluster together
+    assert person["s2"] == "Alice"  # and the inherited turn joins them
     assert {person[f"b{i}"] for i in range(3)} == {None}
     assert {conflict[f"b{i}"] for i in range(3)} == {1}
     assert {person[t] for t in ["c0", "c1", "c2", "d0", "d1", "d2"]} == {"Carol"}
-    assert counts == {"turns": 18, "clusters": 4, "named_clusters": 3, "people": 2, "conflicts": 1}
+    assert counts == {"turns": 19, "clusters": 4, "named_clusters": 3, "people": 2, "conflicts": 1}
 
     group_people(db_path)
     db = sqlite3.connect(db_path)

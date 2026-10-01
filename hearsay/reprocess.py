@@ -70,6 +70,7 @@ def record_run(db_path: Path) -> None:
         "min_turn": speakers.MIN_TURN,
         "owner_threshold": speakers.OWNER_THRESHOLD,
         "not_owner_threshold": speakers.NOT_OWNER_THRESHOLD,
+        "diarization_agreement": speakers.DIARIZATION_AGREEMENT,
         "cluster_threshold": people.CLUSTER_THRESHOLD,
     }
     db = sqlite3.connect(db_path)

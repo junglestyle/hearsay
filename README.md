@@ -136,6 +136,10 @@ as a command with
 5. See precision per threshold: `.venv/bin/python -m hearsay.label report`,
    then set `OWNER_THRESHOLD` / `NOT_OWNER_THRESHOLD` in
    [`hearsay/speakers.py`](hearsay/speakers.py), deploy, and reprocess.
+6. Turns too short to judge by voice take the label of their diarized speaker
+   in the same conversation. Check those by ear, blind, in random order:
+   `.venv/bin/python -m hearsay.label check`. After a reprocess, `report`
+   shows their precision and how much speech is still unlabeled.
 
 ## Reading the utterance stream (consumers)
 

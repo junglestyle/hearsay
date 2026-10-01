@@ -15,7 +15,9 @@ written to `/mnt/storage/hearsay/stream/` after every reprocess): one JSONL
 file per conversation plus `index.json`. Each utterance has conversation_id,
 utterance_id, start/end (UTC), speaker {kind, name, label}, text,
 text_confidence (WhisperX word scores) and speaker_confidence {basis,
-owner_similarity}. Speaker kinds: owner, person (named), anonymous (labeled
+owner_similarity}; basis is voice, named, cluster, diarization (the turn
+took its label from its diarized speaker in the conversation, not its own
+voice) or none. Speaker kinds: owner, person (named), anonymous (labeled
 per conversation, e.g. "anon A"), stranger, unknown. `_noise` and `_media`
 turns are left out; other `_` names are categories, not people.
 
@@ -50,25 +52,20 @@ Downstream consumers read this. They never receive audio.
 
 ## Current slice
 
-Slice 10: Mac audio capture (see the roadmap). A menu-bar app on the
-operator's personal Mac, no pendant: the mic (including AirPods) and system
-audio as separate channels, run/stop from the menu bar, and automatic capture
-during Zoom calls.
+Slice 10: every turn attributed (see the roadmap). Turns too short to judge
+by voice, or ambiguous, take the label of their diarized speaker in the same
+conversation when that speaker's voice-labeled turns agree
+(`DIARIZATION_AGREEMENT` in `hearsay/speakers.py`); inherited not-owner turns
+join their speaker's cluster and name. Voice labels are never overridden,
+and clusters are built from voice-labeled embeddings only.
 
-- Uploaded like pendant audio, to the same tailnet-only capture receiver
-  (`hearsay/capture.py`); any new record kind is added on the NAS first.
-- Speech on the mic channel is the owner's, by channel; during a call the
-  call recording wins over the pendant's.
-- Only the operator's personal Mac; a work machine is never used for capture
-  or holds audio.
-- Recording calls can require everyone's consent depending on jurisdiction.
-
-Slice 9 (the iPhone pendant app, `ios/`) is built; its full-day acceptance
-run (out of range and paused stretches included) happens in normal use.
+- The stream marks inherited turns with basis "diarization".
+- Precision is measured by ear on a random sample of inherited turns
+  (`hearsay-label check`, then `report`), not assumed from agreement.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when a Zoom call's utterances reach the stream with the owner attributed
-by channel, started automatically.
+Done when under 5% of speech time has no speaker, and inherited labels hold up
+by ear at 95% precision or better. Next: slice 11, Mac audio capture.
 
 ## Engineering style
 
