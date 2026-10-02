@@ -42,7 +42,7 @@ SAMPLES = 3
 MIN_TAG_CLUSTER = 3
 
 CLUSTERS_SQL = """
-SELECT tp.turn_id, tp.cluster, t.conversation_id, t.start, t.end, ca.wav_file, ca.zero_at
+SELECT tp.turn_id, tp.cluster, tp.split, t.conversation_id, t.start, t.end, ca.wav_file, ca.zero_at
 FROM turn_people tp
 JOIN turns t ON t.turn_id = tp.turn_id
 JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id
@@ -163,7 +163,10 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         todo, later = [], []
         for c, segs in grouped.items():
             ids = {s["turn_id"] for s in segs}
-            if len(segs) < MIN_TAG_CLUSTER or mixed & ids or cluster_name(ids, names)[0]:
+            # Marked mixed: off the list until reprocess splits its speakers,
+            # then each half comes back to be named.
+            unsplit = {s["turn_id"] for s in segs if not s["split"]}
+            if len(segs) < MIN_TAG_CLUSTER or mixed & unsplit or cluster_name(ids, names)[0]:
                 continue
             (later if skipped & ids else todo).append(c)
         return todo, later

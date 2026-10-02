@@ -143,6 +143,15 @@ Done 2026-10-01: 3.2% of speech time has no speaker (voice 82%,
 diarization 15%), and 278 inherited turns checked by ear after the veto are
 96.4% right (96.2% by speech time).
 
+Follow-up 2026-10-01, clusters: two clusters mixed named people (two women
+bridged by untagged speakers; a man joined to a speaker the diarizer had
+lumped several people into), and the diarizer gave two men one label in two
+conversations, which clustering can't undo. Names are now constraints
+(different names never share a cluster), and "More than one person" splits
+the diarized speakers under the marked turns in two voices; a half not yet
+named joins no named person, so it comes back to be named. Replayed on the
+live data: no conflicts, and the second man came out as his own cluster.
+
 ## 11. Mac audio capture
 
 A menu-bar app on the operator's personal Mac (no pendant) that captures the

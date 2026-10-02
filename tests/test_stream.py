@@ -39,7 +39,7 @@ def build(tmp_path):
         basis = "diarization" if "inherited" in text else "voice" if label else None
         db.execute("INSERT INTO turn_speakers VALUES (?, 'c1', 1, NULL, ?, ?, ?)", (turn_id, similarity, label, basis))
         if cluster:
-            db.execute("INSERT INTO turn_people VALUES (?, ?, ?, 0)", (turn_id, cluster, person))
+            db.execute("INSERT INTO turn_people VALUES (?, ?, ?, 0, 0)", (turn_id, cluster, person))
     db.commit()
     db.close()
     return db_path

@@ -8,7 +8,7 @@ from array import array
 import pytest
 from fastapi.testclient import TestClient
 
-pytest.importorskip("scipy")
+pytest.importorskip("numpy")
 
 from hearsay.assemble import SCHEMA as ASSEMBLE_SCHEMA  # noqa: E402
 from hearsay.parse import SCHEMA as PARSE_SCHEMA  # noqa: E402
