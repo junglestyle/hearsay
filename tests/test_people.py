@@ -29,7 +29,7 @@ def at(start):
 def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
     rng = random.Random(0)
     voices = {v: unit([rng.gauss(0, 1) for _ in range(192)])
-              for v in ["alice", "bob", "carol1", "carol2", "me", "dave", "erin"]}
+              for v in ["alice", "bob", "carol1", "carol2", "me", "dave", "erin", "fay"]}
 
     def near(voice):
         return unit([x + rng.gauss(0, 0.04) for x in voices[voice]])
@@ -49,6 +49,8 @@ def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
     # Two people the diarizer gave one label in c5, which the operator heard
     # and marked mixed: clustering alone can't take them apart.
     turns += [(f"e{i}", "c5", "dave" if i < 4 else "erin", "not_owner") for i in range(7)]
+    # Fay once had a turn tagged _noise; her other conversation stays hers.
+    turns += [("f0", "c2", "fay", "not_owner"), ("f1", "c3", "fay", "not_owner"), ("f2", "c3", "fay", "not_owner")]
     diarized = {"s0": "SPEAKER_00", "s1": "SPEAKER_00", "s2": "SPEAKER_00"}
     diarized |= {f"e{i}": "SPEAKER_01" for i in range(7)}
     start = {turn_id: 5.0 * i for i, (turn_id, *_) in enumerate(turns)}
@@ -80,6 +82,7 @@ def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
         {"type": "name", "at": at(start["d2"]), "name": "Carol"},  # same name merges clusters
         {"type": "name", "at": at(9_000.0), "name": "Nobody"},  # nothing there any more
         {"type": "mixed", "at": at(start["e5"])},
+        {"type": "name", "at": at(start["f0"]), "name": "_noise"},
         {"type": "name", "at": at(start["e0"]), "name": "Dave"},
     ]
     (labels_dir / "tags.jsonl").write_text("".join(json.dumps(t) + "\n" for t in tags))
@@ -106,7 +109,10 @@ def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
     # Erin is her own, unnamed speaker, ready to be named.
     assert {person[f"e{i}"] for i in range(4, 7)} == {None}
     assert len({cluster[f"e{i}"] for i in range(4, 7)}) == 1
-    assert counts == {"turns": 26, "clusters": 7, "named_clusters": 6, "people": 5, "conflicts": 0}
+    # A category takes only what was tagged with it, never a speaker by resemblance.
+    assert person["f0"] == "_noise"
+    assert person["f1"] is person["f2"] is None
+    assert counts == {"turns": 29, "clusters": 9, "named_clusters": 7, "people": 6, "conflicts": 0}
 
     group_people(db_path)
     db = sqlite3.connect(db_path)

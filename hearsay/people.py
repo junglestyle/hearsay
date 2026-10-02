@@ -6,7 +6,7 @@ input (labels/tags.jsonl), matched to turns by time (hearsay/turns.py). A
 cluster takes the name of its tagged turns, which makes naming retroactive,
 and giving two clusters the same name merges them into one person. Different
 names keep speakers apart, and marking a cluster mixed splits the diarized
-speakers under the marked turns in two.
+speakers under the marked turns into voices.
 """
 
 import sqlite3
@@ -24,6 +24,10 @@ from hearsay.speakers import mean_unit
 # raise it; one person over many clusters, lower it.
 CLUSTER_THRESHOLD = 0.40
 
+# Speech a voice needs, when a speaker marked mixed is split, to count as a
+# person rather than scraps of one.
+MIN_VOICE_SECONDS = 60
+
 SCHEMA = """
 DROP TABLE IF EXISTS turn_people;
 -- One row per turn labeled not_owner, by voice, by channel or inherited by diarization.
@@ -32,7 +36,7 @@ CREATE TABLE turn_people (
     cluster TEXT NOT NULL,           -- smallest turn_id in the cluster; changes as data grows
     person TEXT,                     -- operator's name for the cluster, NULL if unnamed or conflicting
     name_conflict INTEGER NOT NULL,  -- 1 if the cluster's tagged turns carry different names
-    split INTEGER NOT NULL           -- 1 if its diarized speaker was split in two voices (marked mixed)
+    split INTEGER NOT NULL           -- 1 if its diarized speaker was split in voices (marked mixed)
 );
 """
 
@@ -47,7 +51,8 @@ def cluster(vectors, names: list[set[str]]) -> list[int]:
     """Average-linkage clusters of unit vectors, as one label per vector.
 
     The operator's names are constraints: vectors whose turns carry different
-    names never end up in one cluster, however alike they sound. Without
+    names never end up in one cluster, however alike they sound, and a
+    category joins nothing untagged. Without
     them, two people a few untagged speakers bridge get merged (on real data,
     2026-10-01, two named women joined through an hour of untagged speech).
     """
@@ -62,9 +67,17 @@ def cluster(vectors, names: list[set[str]]) -> list[int]:
     label = list(range(n))
     np.fill_diagonal(sim, -np.inf)
 
+    def category(x):
+        return any(name.startswith("_") for name in x)
+
     def block(i):
         for j in range(n):
-            if names[i] and names[j] and names[i] != names[j]:
+            # A category (_noise, _media, _stranger) is many voices, not one,
+            # so its average resembles plenty of real speakers: it takes only
+            # what the operator tagged. Once a two-turn _noise cluster grew to
+            # 794 turns, real conversation the stream then left out.
+            differ = names[i] != names[j]
+            if differ and ((names[i] and names[j]) or category(names[i]) or category(names[j])):
                 sim[i, j] = sim[j, i] = -np.inf
 
     for i in range(n):
@@ -86,55 +99,69 @@ def cluster(vectors, names: list[set[str]]) -> list[int]:
     return label
 
 
-def two_voices(vectors) -> list[int]:
-    """Each turn's half when one diarized speaker is split in two by voice.
+def voices(vectors, seconds: list[float]) -> list[int]:
+    """Each turn's voice in a diarized speaker the operator heard more than
+    one person in.
 
-    Two-means on cosine, started from the turn least like the speaker's
-    average and the turn least like that one, so it is deterministic.
+    As many voices as its turns form when clustered among themselves, with at
+    least MIN_VOICE_SECONDS of speech each, and at least two (the operator
+    said so); then each turn goes to the nearest voice, until that settles.
+    In a noisy restaurant the diarizer gave four people one label; split this
+    way they came out as three voices, the fourth (a waiter) too brief.
     """
     import numpy as np
 
     v = np.array(vectors)
-    first = int(np.argmin(v @ v.mean(axis=0)))
-    centers = v[[first, int(np.argmin(v @ v[first]))]]
+    groups = {}
+    for i, c in enumerate(cluster(v, [set()] * len(v))):
+        groups.setdefault(c, []).append(i)
+    found = [g for g in groups.values() if sum(seconds[i] for i in g) >= MIN_VOICE_SECONDS]
+    if len(found) >= 2:
+        centers = np.array([v[g].mean(axis=0) for g in found])
+    else:
+        # Started from the turn least like the speaker's average and the turn
+        # least like that one, so it is deterministic.
+        first = int(np.argmin(v @ v.mean(axis=0)))
+        centers = v[[first, int(np.argmin(v @ v[first]))]]
     side = None
     for _ in range(50):
-        new = list(np.argmax(v @ centers.T, axis=1))
-        if new == side or len(set(new)) < 2:
+        new = [int(k) for k in np.argmax(v @ centers.T, axis=1)]
+        if new == side:
             break
         side = new
-        centers = np.array([v[np.array(side) == k].mean(axis=0) for k in (0, 1)])
+        centers = np.array([v[np.array(side) == k].mean(axis=0) if k in side else centers[k]
+                            for k in range(len(centers))])
         centers /= np.linalg.norm(centers, axis=1, keepdims=True)
-    return [int(k) for k in side] if side else [0] * len(v)
+    return side
 
 
-def speaker_vectors(rows, mixed: set[str]) -> tuple[list[list[str]], list[list[float]], list[tuple]]:
+def speaker_vectors(rows, mixed: set[tuple[str, str]]) -> tuple[list[list[str]], list[list[float]], list[tuple]]:
     """One averaged, unit-length embedding per diarized speaker per conversation.
 
     A speaker's turns together embed far more steadily than any single short
     turn. Turns whose words got no diarized speaker stand alone. A speaker
-    the operator heard more than one person in (a turn marked mixed) is split
-    in two voices: the diarizer can give two people one label, and clustering
-    can't take a speaker apart. Halves, not single turns: on real data single
-    turns of the second voice scattered over five clusters.
+    the operator heard more than one person in (`mixed`) is split
+    in voices: the diarizer can give several people one label, and
+    clustering can't take a speaker apart. Voices, not single turns: on real
+    data single turns of a second person scattered over five clusters.
 
-    Also returns each vector's speaker, (conversation_id, diar_speaker, half),
-    half None for an unsplit speaker.
+    Also returns each vector's speaker, (conversation_id, diar_speaker, voice),
+    voice None for an unsplit speaker.
     """
     groups = {}
-    for turn_id, conversation_id, diar_speaker, embedding in rows:
+    for turn_id, conversation_id, diar_speaker, seconds, embedding in rows:
         key = (conversation_id, diar_speaker) if diar_speaker else (conversation_id, turn_id)
-        groups.setdefault(key, []).append((turn_id, list(array("f", embedding))))
+        groups.setdefault(key, []).append((turn_id, seconds, list(array("f", embedding))))
     members, vectors, speakers = [], [], []
     for key in sorted(groups, key=lambda k: (k[0], k[1] or "")):
         group = groups[key]
-        split = len(group) > 1 and any(turn_id in mixed for turn_id, _ in group)
-        sides = two_voices([v for _, v in group]) if split else [None] * len(group)
-        for half in sorted(set(sides), key=lambda h: (h is None, h)):
-            part = [(turn_id, v) for (turn_id, v), side in zip(group, sides) if side == half]
+        split = len(group) > 1 and key in mixed
+        sides = voices([v for _, _, v in group], [s for _, s, _ in group]) if split else [None] * len(group)
+        for voice in sorted(set(sides), key=lambda h: (h is None, h)):
+            part = [(turn_id, v) for (turn_id, _, v), side in zip(group, sides) if side == voice]
             members.append([turn_id for turn_id, _ in part])
             vectors.append(mean_unit([v for _, v in part]))
-            speakers.append((*key, half))
+            speakers.append((*key, voice))
     return members, vectors, speakers
 
 
@@ -142,36 +169,40 @@ def group_people(db_path: Path) -> dict:
     db = sqlite3.connect(db_path)
     try:
         names = dict(db.execute("SELECT turn_id, value FROM operator_input WHERE kind = 'name'"))
-        mixed = {t for (t,) in db.execute("SELECT turn_id FROM operator_input WHERE kind = 'mixed'")}
+        # Any turn marked mixed, inherited ones too, marks its whole diarized speaker.
+        mixed = set(db.execute(
+            "SELECT t.conversation_id, t.diar_speaker FROM operator_input oi JOIN turns t ON t.turn_id = oi.turn_id"
+            " WHERE oi.kind = 'mixed' AND t.diar_speaker IS NOT NULL"
+        ))
         # Only turns labeled not_owner by voice or by a Mac recording's
         # channel: the owner's voice never joins a cluster, even when
         # diarization lumps it in with someone else's.
         rows = db.execute(
-            "SELECT ts.turn_id, t.conversation_id, t.diar_speaker, ts.embedding FROM turn_speakers ts"
+            "SELECT ts.turn_id, t.conversation_id, t.diar_speaker, t.end - t.start, ts.embedding FROM turn_speakers ts"
             " JOIN turns t ON t.turn_id = ts.turn_id WHERE ts.label = 'not_owner'"
             " AND ts.basis IN ('voice', 'channel') AND ts.embedding IS NOT NULL"
             " ORDER BY ts.turn_id"
         ).fetchall()
         groups, vectors, speakers = speaker_vectors(rows, mixed)
-        # A half the operator hasn't named yet is a voice they said was
-        # someone else: it may join other unnamed speakers but no named
-        # person until they name it, so it comes back to be named. On real
-        # data the half that was a new person otherwise joined a bartender.
+        # A split-off voice the operator hasn't named yet is someone they
+        # said was another person: it may join other unnamed speakers but no
+        # named person until they name it, so it comes back to be named. On
+        # real data a new person's voice otherwise joined a bartender.
         tagged = []
-        for i, (turn_ids, (_, _, half)) in enumerate(zip(groups, speakers)):
+        for i, (turn_ids, (_, _, voice)) in enumerate(zip(groups, speakers)):
             found = {names[t] for t in turn_ids if t in names}
-            tagged.append(found if found or half is None else {f"unnamed half {i}"})
+            tagged.append(found if found or voice is None else {f"unnamed voice {i}"})
         labels = cluster(vectors, tagged)
 
         members = {}
         split = set()
         speaker_cluster = {}
-        for turn_ids, (conversation_id, diar_speaker, half), c in zip(groups, speakers, labels):
+        for turn_ids, (conversation_id, diar_speaker, voice), c in zip(groups, speakers, labels):
             members.setdefault(c, []).extend(turn_ids)
-            if half is not None:
+            if voice is not None:
                 split.update(turn_ids)
                 split.add((conversation_id, diar_speaker))
-            # A split speaker's inherited turns go with its larger half: like
+            # A split speaker's inherited turns go with its largest voice: like
             # any inherited turn, a guess from the speaker, not the voice.
             best = speaker_cluster.get((conversation_id, diar_speaker))
             if best is None or len(turn_ids) > best[1]:

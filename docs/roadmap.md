@@ -145,12 +145,16 @@ diarization 15%), and 278 inherited turns checked by ear after the veto are
 
 Follow-up 2026-10-01, clusters: two clusters mixed named people (two women
 bridged by untagged speakers; a man joined to a speaker the diarizer had
-lumped several people into), and the diarizer gave two men one label in two
-conversations, which clustering can't undo. Names are now constraints
-(different names never share a cluster), and "More than one person" splits
-the diarized speakers under the marked turns in two voices; a half not yet
-named joins no named person, so it comes back to be named. Replayed on the
-live data: no conflicts, and the second man came out as his own cluster.
+lumped several people into); the diarizer gave two men one label in two
+conversations, and four people at a noisy dinner one label; and a `_noise`
+cluster seeded by two tagged turns grew to 794, taking a real person's 32
+minutes out of the stream. Names are now constraints (different names never
+share a cluster), a category takes only turns tagged with it, and "More than
+one person" splits the diarized speakers under the marked turns into as many
+voices as their turns form (at least two); a voice not yet named joins no
+named person, so it comes back to be named. Replayed on the live data: no
+conflicts, the dinner came out as three voices, and the second man as his
+own cluster (7 of 13 of his turns checked; 4 stay with the first).
 
 ## 11. Mac audio capture
 

@@ -164,7 +164,7 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         for c, segs in grouped.items():
             ids = {s["turn_id"] for s in segs}
             # Marked mixed: off the list until reprocess splits its speakers,
-            # then each half comes back to be named.
+            # then each voice comes back to be named.
             unsplit = {s["turn_id"] for s in segs if not s["split"]}
             if len(segs) < MIN_TAG_CLUSTER or mixed & unsplit or cluster_name(ids, names)[0]:
                 continue
@@ -329,6 +329,10 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             # renames the cluster or settles a conflict, and forgetting
             # (a name record with no name) clears every name it carries.
             chosen = heard + [s for s in turns if s["turn_id"] in names and s not in heard]
+            if name.startswith("_"):
+                # A category takes only tagged turns (hearsay/people.py), so
+                # it is put on the whole cluster as it is now.
+                chosen = turns
             append_tag({"type": "name", **spans(chosen), "name": name if action == "name" else None})
         else:
             return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)

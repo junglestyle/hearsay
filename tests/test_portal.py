@@ -179,5 +179,7 @@ def test_renaming_a_person_renames_every_cluster_at_once(portal):
 
     reprocess_people(db_path, labels_dir)
     db = sqlite3.connect(db_path)
-    assert db.execute("SELECT DISTINCT person FROM turn_people").fetchall() == [("_media",)]
+    # A category takes only the turns tagged with it, so the turns the
+    # cluster pages didn't sample come back to be named.
+    assert db.execute("SELECT DISTINCT person FROM turn_people ORDER BY 1").fetchall() == [(None,), ("_media",)]
     db.close()
