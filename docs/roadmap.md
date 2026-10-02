@@ -179,3 +179,35 @@ its raw payloads and audio are deleted is the same question as above.
 Done when: non-owner audio is actually gone from disk, a forgotten span is
 gone from the stream and listed in `forgotten.json`, and nothing that
 depends on either breaks.
+
+## 13. Where a conversation happened
+
+The phone app records where the owner is while it captures, and each
+conversation in the stream says where it happened, for downstream context.
+Like taps, a fact about the capture, not an interpretation of it. The phone
+is the source: it is with the owner wherever the pendant is, and the Mac's
+location says little. Uploaded with the capture to the same tailnet-only
+receiver, kept with the raw payloads, and re-run from raw like everything
+else.
+
+Location is as personal as the audio, but unlike audio it reaches
+consumers. First resolve how precise it is in the stream (coordinates, or
+a place the operator has named such as "Chill Room"), how often the phone
+samples it (battery), and whether a conversation that moves gets one place
+or several.
+
+Done when: a day of conversations reaches the stream each with where it
+happened, and the phone's battery use for it is acceptable.
+
+## 14. Place as a hint for who is speaking
+
+People are tied to places (the bartender at the Chill Room, a coworker at
+the office), and operator names already carry them ("Robert (Chill Room)").
+Use where a conversation happened to suggest who an unnamed speaker is: in
+the portal first, ranking the people heard at that place ahead of
+others, then perhaps as weak evidence in clustering. Voice stays the
+judge: a place never names anyone on its own, and never overrides a voice
+label or the operator's names.
+
+Done when: naming a cluster in the portal offers the people heard at that
+place first, and that measurably saves the operator time.
