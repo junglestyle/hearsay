@@ -159,6 +159,18 @@ rooms different people score 0.4-0.6, and split voices otherwise joined the
 wrong people. Replayed on the live data with no new marks: no conflicts, the
 dinner came out as three voices, and the second man as his own cluster.
 
+Follow-up 2026-10-05, diarization: the lumps start in the diarizer, so it now
+splits more readily (VBx `Fb` 0.6, from the model's 0.8; `SETTINGS` in
+`hearsay/transcribe.py`). Re-diarized 18 conversations at 13 settings and
+scored against the operator's names and labels: tagged speech under the
+wrong name fell from 49 s to 9 s, owner speech sharing a speaker with others
+from 260 s to 126 s, and speakers where voices() still hears several from 4
+to 1, for 63 to 78 speakers and no clean conversation split further. The
+dinner's two speakers became the owner plus three voices, and Veronica came
+apart from Bella and the strangers. Still lumped: Robert and Christian in
+c20260929T025421Z, and c20260930T232900Z (four voices under one label). Every
+conversation is re-transcribed with the new setting.
+
 ## 11. Mac audio capture
 
 A menu-bar app on the operator's personal Mac (no pendant) that captures the

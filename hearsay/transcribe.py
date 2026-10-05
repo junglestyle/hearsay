@@ -30,6 +30,16 @@ SETTINGS = {
     "language": "en",
     "batch_size": 16,
     "diarization_model": "pyannote/speaker-diarization-community-1",
+    # VBx's speaker prior: lower keeps more speakers. The model's own 0.8 gave
+    # several people one label (a dinner's four people under two). Re-run on
+    # 18 real conversations (2026-10-01), 0.6 cut operator-tagged speech under
+    # the wrong name from 49 s to 9 s and owner speech sharing a speaker with
+    # others from 260 s to 126 s, split the dinner into the three voices
+    # people.voices() hears, and left clean conversations' speaker counts
+    # alone. The clustering threshold (0.5) also merged two people, and Fa
+    # past 0.09 shatters speakers. Over-splitting is cheap: people.py
+    # re-merges a person split across speakers.
+    "diarization_Fb": 0.6,
 }
 
 # Runs on the NAS: prints {conversation_id: [wav_sha256, settings]} for the transcripts there.
@@ -66,6 +76,7 @@ def load_models(hf_token: str):
                               language=SETTINGS["language"])
     align = whisperx.load_align_model(language_code=SETTINGS["language"], device=DEVICE)
     diarize = DiarizationPipeline(model_name=SETTINGS["diarization_model"], token=hf_token, device=DEVICE)
+    diarize.model.clustering.Fb = SETTINGS["diarization_Fb"]
     return asr, align, diarize
 
 
