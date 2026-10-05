@@ -16,7 +16,11 @@ struct VoicesView: View {
         NavigationStack {
             Group {
                 if let url = Settings.portalURL {
-                    PortalView(home: url, reload: reload)
+                    // A fresh web view on each refresh, as restarting the app
+                    // gives: reloading the old one can stay stuck on a
+                    // connection that died while Tailscale reconnected.
+                    PortalView(home: url)
+                        .id(reload)
                         .ignoresSafeArea(edges: .bottom)
                 } else {
                     ContentUnavailableView("No portal address", systemImage: "person.wave.2",
@@ -26,7 +30,7 @@ struct VoicesView: View {
             .navigationTitle("Voices")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                Button { reload += 1 } label: { Image(systemName: "house") }
+                Button { reload += 1 } label: { Image(systemName: "arrow.clockwise") }
             }
         }
     }
@@ -34,7 +38,6 @@ struct VoicesView: View {
 
 private struct PortalView: UIViewRepresentable {
     let home: URL
-    let reload: Int
 
     func makeCoordinator() -> Coordinator { Coordinator(home: home) }
 
@@ -49,16 +52,14 @@ private struct PortalView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
-        // The home button, or a new portal address.
-        guard reload != context.coordinator.reload || home != context.coordinator.home else { return }
-        context.coordinator.reload = reload
+        // A new portal address.
+        guard home != context.coordinator.home else { return }
         context.coordinator.home = home
         context.coordinator.open(view)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var home: URL
-        var reload = 0
 
         // Set when the portal refused the token, so its own login page shows.
         private var tokenRefused = false
@@ -76,7 +77,8 @@ private struct PortalView: UIViewRepresentable {
                 view.load(URLRequest(url: home))
                 return
             }
-            var request = URLRequest(url: home.appendingPathComponent("login/app"))
+            // A stalled connection shows the error page instead of a blank one.
+            var request = URLRequest(url: home.appendingPathComponent("login/app"), timeoutInterval: 20)
             request.httpMethod = "POST"
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             view.load(request)
@@ -107,6 +109,25 @@ private struct PortalView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            showError(webView, error)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            showError(webView, error)
+        }
+
+        /// iOS ends the page's process while the app is in the background,
+        /// which leaves the tab blank until something loads it again.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            open(webView)
+        }
+
+        private func showError(_ webView: WKWebView, _ error: Error) {
+            // Not failures: a load replaced by another (-999, such as the
+            // token login), or one this delegate cancelled (WebKit's 102).
+            let error = error as NSError
+            if error.code == NSURLErrorCancelled { return }
+            if error.domain == "WebKitErrorDomain" && error.code == 102 { return }
             let message = "Can't reach the portal at \(home.absoluteString): \(error.localizedDescription). Is Tailscale on?"
             webView.loadHTMLString("<meta name=viewport content='width=device-width'><p style='font:17px system-ui;padding:1rem'>"
                                    + message.replacingOccurrences(of: "<", with: "&lt;") + "</p>", baseURL: nil)
