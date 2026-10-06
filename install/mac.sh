@@ -91,6 +91,12 @@ if [ "$plist" != "$(cat "$MAC_PLIST" 2>/dev/null)" ]; then
 fi
 if [ "$changed" = 1 ] || ! launchctl print "gui/$(id -u)/$MAC_LABEL" >/dev/null 2>&1; then
     launchctl bootout "gui/$(id -u)/$MAC_LABEL" 2>/dev/null || true
+    # bootout returns before the old agent is gone; bootstrapping over it
+    # fails with "Bootstrap failed: 5".
+    for _ in $(seq 10); do
+        launchctl print "gui/$(id -u)/$MAC_LABEL" >/dev/null 2>&1 || break
+        sleep 1
+    done
     launchctl bootstrap "gui/$(id -u)" "$MAC_PLIST"
     echo "started: $MAC_LABEL (log: $MAC_LOG)"
 else

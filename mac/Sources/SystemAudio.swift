@@ -91,8 +91,15 @@ final class SystemAudio {
             throw Failure("can't create the tap's aggregate device (\(status))")
         }
         status = AudioDeviceCreateIOProcIDWithBlock(&proc, aggregate, queue) { _, input, inputTime, _, _ in
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: input, deallocator: nil) else { return }
-            channel.append(buffer, at: wallTime(hostTime: inputTime.pointee.mHostTime))
+            // The aggregate's input is the output device's own input streams,
+            // if it has any (AirPods in a call have their mic), then the tap's.
+            guard let tapStream = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input)).last
+            else { return }
+            var list = AudioBufferList(mNumberBuffers: 1, mBuffers: tapStream)
+            withUnsafePointer(to: &list) { list in
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: list, deallocator: nil) else { return }
+                channel.append(buffer, at: wallTime(hostTime: inputTime.pointee.mHostTime))
+            }
         }
         guard status == noErr else {
             stop()
