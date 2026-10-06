@@ -28,7 +28,7 @@ ssh -o BatchMode=yes nas "test -w '$NAS_TRANSCRIPTS' && test -r '$NAS_ROOT/db/he
     || die "the NAS isn't ready: run install/nas.sh there, then a reprocess, then re-run this."
 
 say "Python 3.12 environment in $GPU_VENV"
-# 3.12: WhisperX's dependencies don't support newer Pythons yet.
+# 3.12: the Python the transcribe extras are pinned and tested against.
 command -v uv >/dev/null || die "install uv first: https://docs.astral.sh/uv/getting-started/installation/"
 uv python install 3.12
 [ -x "$GPU_VENV/bin/python" ] || uv venv --python 3.12 "$GPU_VENV"

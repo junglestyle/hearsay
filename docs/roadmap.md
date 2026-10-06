@@ -59,6 +59,20 @@ Omi segments they were made on), so no operator input is lost.
 Done when: every conversation's utterances come from our own transcription,
 and past labels and names still apply.
 
+Follow-up 2026-10-06: Parakeet TDT 0.6B v3 (NeMo) replaced Whisper large-v3
+for the words, with pyannote's diarization run directly. On a real stretch
+Whisper had dropped 30 s of speech and repeated one line four times over the
+gap. In a blind listening check of 24 turns Parakeet Ultra (the same model
+post-trained) was closer where it and Whisper disagreed most (7 to 3), and
+wrote Spanish where Whisper, told English, translated it; it skipped some
+short interjections Whisper caught. Parakeet detects the language itself and
+can't be told to keep to English and Spanish; its rare guesses at other
+languages (12 of 5,300 turns) were over noise both models got wrong.
+`text_confidence` in the stream changed scale with it (words average about
+0.93).
+Long conversations are transcribed in pieces of at most 5 minutes, cut in
+pauses.
+
 ## 7. Own conversation boundaries
 
 Split the continuous audio stream into conversations ourselves (speech

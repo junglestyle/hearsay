@@ -1,6 +1,6 @@
 """Speaker turns from our own transcripts, and the operator's input resolved onto them.
 
-Transcripts are WhisperX output made on the dev box (hearsay/transcribe.py)
+Transcripts are Parakeet and pyannote output made on the dev box (hearsay/transcribe.py)
 from a conversation's WAV. A transcript is used only if it was made from the
 exact WAV reprocess just assembled (same sha256); otherwise the conversation
 is pending until the dev box redoes it. Turn times are offsets into that WAV,
@@ -40,8 +40,8 @@ CREATE TABLE turns (
     start REAL NOT NULL,             -- seconds into the conversation WAV
     end REAL NOT NULL,
     text TEXT NOT NULL,
-    diar_speaker TEXT,               -- WhisperX speaker within this conversation only
-    confidence REAL                  -- mean word alignment score, NULL if no word was aligned
+    diar_speaker TEXT,               -- diarized speaker within this conversation only
+    confidence REAL                  -- mean word confidence, NULL if no word has one
 );
 -- The operator's labels and tags as they apply to the current turns.
 CREATE TABLE operator_input (

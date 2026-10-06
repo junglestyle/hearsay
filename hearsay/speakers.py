@@ -32,8 +32,8 @@ from hearsay.cache import Cache, audio_key
 # the cutoff kept 87% of speech time. At these values, labeled segments of
 # at least 2.5 s scored precision 1.00 on both sides (owner recall 0.93 over
 # 64 predictions, not-owner recall 0.90 over 26). Owner sits above 0.30, the
-# lowest value tested, for margin. Re-check them on WhisperX turns, whose
-# boundaries differ from Omi's.
+# lowest value tested, for margin. Re-check them on our own transcripts'
+# turns, whose boundaries differ from Omi's.
 MIN_TURN = 2.5
 # The speaker model fails on clips under 40 ms (its padding outgrows the
 # input), so shorter turns aren't embedded even for the veto.

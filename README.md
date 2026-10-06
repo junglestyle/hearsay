@@ -28,7 +28,7 @@ Secrets are kept in env files outside the repo.
 4. **NAS, as root:** reprocess once (below), so there are conversation WAVs to
    transcribe.
 5. **Dev box with the GPU, as your user:** [`install/gpu.sh`](install/gpu.sh)
-   sets up transcription (WhisperX) and an hourly timer that pulls new WAVs
+   sets up transcription (Parakeet, pyannote) and an hourly timer that pulls new WAVs
    from the NAS over `ssh nas` and writes transcripts back. It asks for a
    Hugging Face token for the gated diarization model. Then reprocess again.
 

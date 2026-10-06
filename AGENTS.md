@@ -14,7 +14,8 @@ The product of Hearsay is a stream of utterance records (`hearsay/stream.py`,
 written to `/mnt/storage/hearsay/stream/` after every reprocess): one JSONL
 file per conversation plus `index.json`. Each utterance has conversation_id,
 utterance_id, start/end (UTC), speaker {kind, name, label}, text,
-text_confidence (WhisperX word scores) and speaker_confidence {basis,
+text_confidence (Parakeet's token probabilities, each word its least
+likely token) and speaker_confidence {basis,
 owner_similarity}; basis is voice, named, cluster, channel (in a Mac
 recording, the turn was loud on the mic, so the owner's, or on the call, so
 someone else's), diarization (the turn took its label from its diarized
