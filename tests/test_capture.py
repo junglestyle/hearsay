@@ -12,7 +12,7 @@ from hearsay import capture
 from hearsay.assemble import cut, place_bursts
 from hearsay.capture import ACTION, AUDIO, BUTTON, CONNECTED, MIC, STORED, SYSTEM, load_captures
 from hearsay.parse import rebuild
-from hearsay.speakers import by_channel, mac_channels
+from hearsay.speakers import by_channel, label_for, mac_channels, with_channel
 from test_assemble import T
 
 try:
@@ -252,3 +252,10 @@ def test_mac_channels_are_mixed_win_over_the_pendant_and_say_who_spoke(tmp_path)
     assert by_channel(raw, channels, t0 + 0.1, 0.8) == "owner"
     assert by_channel(raw, channels, t0 + 1.1, 0.8) == "not_owner"
     assert by_channel(raw, channels, t0 + 5, 1.0) is None  # outside the recording
+
+
+def test_a_clear_voice_overrides_the_channel():
+    # Built-in speakers: the other side, louder on the mic, sounds nothing like the owner.
+    assert with_channel(label_for(0.03), "owner") == ("not_owner", "voice")
+    # A voice that can't tell leaves it to the channel.
+    assert with_channel(label_for(0.25), "owner") == ("owner", "channel")

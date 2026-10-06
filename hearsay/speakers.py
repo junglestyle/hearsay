@@ -169,6 +169,20 @@ def channel_label(mic: bytes, system: bytes) -> str | None:
     return None
 
 
+def with_channel(label: str | None, channel: str | None) -> tuple[str | None, str | None]:
+    """A turn's label and basis, from its voice label and its Mac channel.
+
+    The channel decides, unless the voice clearly says otherwise. On
+    built-in speakers the mic hears the other side through them: on a real
+    call (2026-10-06) the other person was 21-26 dB louder on the mic than
+    on the call, where the owner alone is 46-67 dB louder, and only the
+    voice (0.02-0.05 to the owner) told them apart.
+    """
+    if channel and label in (None, channel):
+        return channel, "channel"
+    return label, "voice" if label else None
+
+
 def mac_channels(db: sqlite3.Connection) -> dict[str, list]:
     """Bursts per Mac channel, for cut()."""
     channels = {"mic": [], "system": []}
@@ -224,9 +238,8 @@ def label_speakers(raw_dir: Path, db_path: Path, labels_dir: Path, model_dir: Pa
                     label = label_for(similarity)
             elif owner is not None and channel is None and duration >= MIN_EMBED and coverage >= MIN_COVERAGE:
                 short[turn_id] = embed(model, pcm, cache)
-            basis = "voice" if label else None
-            if channel:
-                label, basis = channel, "channel"
+            label, basis = with_channel(label, channel)
+            if basis == "channel":
                 counts["by_channel"] += 1
             if label:
                 counts[label] += 1
