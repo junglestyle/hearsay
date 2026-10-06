@@ -61,6 +61,9 @@ def cluster(vectors, names: list[set[str]]) -> list[int]:
     import numpy as np
 
     n = len(vectors)
+    if n == 0:
+        # Nothing labeled not_owner by voice yet, e.g. before enrollment.
+        return []
     v = np.array(vectors)
     sim = v @ v.T
     size = np.ones(n)

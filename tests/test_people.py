@@ -118,3 +118,16 @@ def test_names_on_a_few_turns_apply_to_whole_clusters(tmp_path):
     db = sqlite3.connect(db_path)
     assert db.execute("SELECT * FROM turn_people ORDER BY turn_id").fetchall() == first
     db.close()
+
+
+def test_nothing_to_cluster(tmp_path):
+    # Before enrollment no turn is labeled not_owner by voice; reprocess still runs.
+    db_path = tmp_path / "h.sqlite"
+    db = sqlite3.connect(db_path)
+    db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA)
+    db.execute("INSERT INTO conversation_audio VALUES ('c1', ?, 600, 1, NULL, NULL)", (ZERO_AT,))
+    db.execute("INSERT INTO turns VALUES ('t0', 'c1', 0, 0, 4, 'synthetic', 'SPEAKER_00', NULL)")
+    db.execute("INSERT INTO turn_speakers VALUES ('t0', 'c1', 1.0, NULL, NULL, NULL, NULL)")
+    db.commit()
+    db.close()
+    assert group_people(db_path) == {"turns": 0, "clusters": 0, "named_clusters": 0, "people": 0, "conflicts": 0}
