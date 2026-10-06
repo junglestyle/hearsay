@@ -184,11 +184,25 @@ starting on its own: a call is recorded only once the operator says yes.
 Done when: a Zoom call's utterances reach the stream with the owner
 attributed by channel, recorded after the app's prompt.
 
+Done 2026-10-06: test calls on built-in speakers and AirPods, each recorded
+after the prompt, reached the stream (c20261006T182003Z) with the owner by
+channel and the other person never attributed to the owner. Measured per
+speech stretch, the owner alone is 46-67 dB louder on the mic than on the
+call, and the other side on AirPods 21-41 dB quieter, so the 12 dB
+`CHANNEL_RATIO` holds. On built-in speakers the mic hears the other side
+through them, 3-26 dB louder than on the call, which would pass for the
+owner; a turn the voice clearly places is now labeled by voice instead
+(`with_channel`). A short turn on speakers still follows the channel. With
+AirPods the tap first recorded the AirPods' own input instead of Zoom (fixed
+in `mac/`); calls under 30 s of speech are dropped like any conversation.
+
 ## 12. Retention
 
 Delete non-owner audio after embedding and transcription. Starts only
-once tagging is reliable: until then all audio is kept, because deleted
-audio can't be re-embedded or re-tagged. First resolve how this fits
+once the models are tuned (diarization, voice thresholds, clustering): until
+then all audio is kept, because deleted audio can't be re-embedded or
+re-transcribed. Decided 2026-10-06: then delete audio older than a rolling
+window, 90 days to start, revised down later. First resolve how this fits
 "raw payloads are never deleted" and "everything re-runs from raw".
 
 Forgetting goes here too: the operator forgets a span, which is left out

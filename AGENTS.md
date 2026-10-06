@@ -76,32 +76,31 @@ Guarantees consumers rely on (Idea Machine, `docs/ROADMAP.md` §3 there):
 
 ## Current slice
 
-Slice 11: Mac audio capture (see the roadmap). A menu-bar app on the
-operator's personal Mac, no pendant: the mic (including AirPods) and system
-audio as separate channels, run/stop from the menu bar, and a prompt to
-record when a Zoom call starts.
+Slice 12: retention (see the roadmap). Not started: all audio is kept until
+the operator says the models (diarization, voice thresholds, clustering) are
+tuned, because tuning re-runs over old audio. Then audio older than a rolling
+window is deleted, 90 days to start and revised down later. Past the window
+a conversation keeps its transcript, embeddings and names (naming and merging
+stay retroactive) but can no longer be re-transcribed or re-embedded.
 
-- Uploaded like pendant audio, to the same tailnet-only capture receiver
-  (`hearsay/capture.py`); any new record kind is added on the NAS first.
-  The app is `mac/` (Swift, installed by `install/mac.sh`); the two channels
-  are mixed on the NAS, and each turn is attributed by which one it's loud
-  on (`CHANNEL_RATIO` in `hearsay/speakers.py`, to check on real calls).
-- Speech on the mic channel is the owner's, by channel; during a call the
-  call recording wins over the pendant's.
-- Only the operator's personal Mac; a work machine is never used for capture
-  or holds audio.
-- Recording calls can require everyone's consent depending on jurisdiction,
-  so a call is never recorded without the operator saying yes: the app asks
-  when a call starts and records only on confirmation.
+- First resolve how the window fits "raw payloads are never deleted" and
+  "re-runnable from raw", and whether it deletes all audio or only
+  non-owner audio (raw audio mixes both in one stream, so the latter means
+  cutting spans).
+- Forgetting goes here too: a forgotten span leaves the stream on every
+  reprocess and is appended to `forgotten.json`.
 
-Slice 10 (every turn attributed) is done: turns voice can't judge inherit
-their diarized speaker's label (`hearsay/speakers.py`). Voice labels are
-never overridden, and clusters are built and named from voice-labeled turns
-only.
+Slice 11 (Mac audio capture) is done: a menu-bar app on the operator's
+personal Mac records the mic and the call as separate channels, only after
+the operator says yes to a Zoom call's prompt (`mac/`, `install/mac.sh`).
+Each turn is attributed by the channel it's loud on (`with_channel` in
+`hearsay/speakers.py`), unless the voice clearly says otherwise; a work
+machine is never used for capture or holds audio.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when a Zoom call's utterances reach the stream with the owner attributed
-by channel, recorded after the app's prompt. Next: slice 12, retention.
+Done when non-owner audio is actually gone from disk, a forgotten span is
+gone from the stream and listed in `forgotten.json`, and nothing that
+depends on either breaks. Next: slice 13, where a conversation happened.
 
 ## Engineering style
 
