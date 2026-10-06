@@ -63,6 +63,9 @@ label { display: block; margin: 0.8rem 0 0.3rem; }
 input { font: inherit; width: 100%; box-sizing: border-box; padding: 0.6rem; }
 button { font: inherit; width: 100%; padding: 0.8rem; margin-top: 0.6rem; }
 .error { color: #c33; }
+.clip { margin-bottom: 1.2rem; }
+.clip input { padding: 0.4rem; }
+.clip button { padding: 0.4rem; margin-top: 0.3rem; }
 """
 
 
@@ -138,13 +141,13 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
     def connect() -> sqlite3.Connection:
         return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
 
-    def read_tags() -> tuple[dict[str, str], set[str], set[str]]:
+    def read_tags() -> tuple[dict[str, str], set[str], set[str], dict[str, str]]:
         db = connect()
         try:
             found = resolve(db, *read_operator_files(labels_dir))
         finally:
             db.close()
-        return found.names, found.mixed, found.skipped
+        return found.names, found.mixed, found.skipped, found.clips
 
     def load_clusters() -> dict[str, list[dict]]:
         db = connect()
@@ -232,7 +235,7 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         if not logged_in(request):
             return RedirectResponse("/login", status_code=303)
         grouped = load_clusters()
-        names, mixed, skipped = read_tags()
+        names, mixed, skipped, _ = read_tags()
         todo, later = unnamed(grouped, names, mixed, skipped)
         people = {}
         conflicts = 0
@@ -268,7 +271,7 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         grouped = load_clusters()
         if cluster_id not in grouped:
             return RedirectResponse("/", status_code=303)
-        names, _, _ = read_tags()
+        names, _, _, clips = read_tags()
         turns = grouped[cluster_id]
         person, conflict = cluster_name([s["turn_id"] for s in turns], names)
         if person:
@@ -277,18 +280,37 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             status = "Tagged with conflicting names. Saving a name settles it."
         else:
             status = "Unnamed."
-        players = "".join(
-            f"<audio controls preload='none' src='/audio/{quote(s['turn_id'])}'></audio>"
-            f"<div class='muted'>{s['end'] - s['start']:.1f} s</div>"
-            for s in samples(turns)
-        )
-        known = "".join(f"<option value='{html.escape(n)}'>" for n in sorted(set(names.values())))
+        action = f"/cluster/{quote(cluster_id)}/clip"
+
+        def player(s: dict, tagged: str | None) -> str:
+            audio = (f"<audio controls preload='none' src='/audio/{quote(s['turn_id'])}'></audio>"
+                     f"<div class='muted'>{s['end'] - s['start']:.1f} s</div>")
+            hidden = f"<input type='hidden' name='turn_id' value='{html.escape(s['turn_id'])}'>"
+            if tagged:
+                return (f"{audio}<form class='clip' method='post' action='{action}'>{hidden}"
+                        f"<span class='muted'>Just this clip: <strong>{html.escape(tagged)}</strong></span>"
+                        "<button type='submit'>Untag clip</button></form>")
+            return (f"{audio}<form class='clip' method='post' action='{action}'>{hidden}"
+                    "<input name='name' list='known' autocomplete='off' autocapitalize='words'"
+                    " placeholder='Just this clip: _noise, _media, a name' required>"
+                    "<button type='submit'>Tag clip</button></form>")
+
+        # Clips tagged on their own aren't the cluster's: fresh samples take
+        # their place, and they're listed below until reprocess moves them out.
+        players = "".join(player(s, None) for s in samples([s for s in turns if s["turn_id"] not in clips]))
+        tagged_clips = "".join(player(s, clips[s["turn_id"]]) for s in turns if s["turn_id"] in clips)
+        if tagged_clips:
+            tagged_clips = "<h2>Tagged on their own</h2>" + tagged_clips
+        categories = {"_noise", "_media", "_stranger"}
+        known = "".join(f"<option value='{html.escape(n)}'>"
+                        for n in sorted(set(names.values()) | set(clips.values()) | categories))
         forget = ("<button type='submit' name='action' value='forget' formnovalidate>Forget this name</button>"
                   if person or conflict else "")
         return page("Hearsay cluster", f"""
 <p><a href="/">← Speakers</a></p>
 <h1>{len(turns)} turns</h1>
-<p class="muted">{len({s['conversation_id'] for s in turns})} conversation(s). {status}</p>
+<p class="muted">{len({s['conversation_id'] for s in turns})} conversation(s). {status}
+A clip that isn't this speaker (a cough, a video, someone else) can be tagged on its own.</p>
 {players}
 <form method="post" action="/cluster/{quote(cluster_id)}">
   <label for="name">Who is this? Reusing a name merges into that person.</label>
@@ -298,7 +320,25 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
   <button type="submit" name="action" value="mixed">More than one person</button>
   <button type="submit" name="action" value="skip" formnovalidate>Skip for now</button>
   {forget}
-</form>""")
+</form>
+{tagged_clips}""")
+
+    @app.post("/cluster/{cluster_id}/clip")
+    async def tag_clip(request: Request, cluster_id: str) -> Response:
+        if not logged_in(request):
+            return RedirectResponse("/login", status_code=303)
+        grouped = load_clusters()
+        if cluster_id not in grouped:
+            return RedirectResponse("/", status_code=303)
+        form = parse_qs((await request.body()).decode())
+        turn_id = form.get("turn_id", [""])[0]
+        name = " ".join(form.get("name", [""])[0].split())
+        turn = next((s for s in grouped[cluster_id] if s["turn_id"] == turn_id), None)
+        if turn is not None:
+            # No name takes the clip's tag back.
+            append_tag({"type": "clip", "at": [wall(turn["zero_at"], turn["start"], turn["end"])],
+                        "turn_ids": [turn_id], "name": name or None})
+        return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)
 
     @app.post("/cluster/{cluster_id}")
     async def tag_cluster(request: Request, cluster_id: str) -> Response:
@@ -310,9 +350,9 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         form = parse_qs((await request.body()).decode())
         action = form.get("action", [""])[0]
         name = " ".join(form.get("name", [""])[0].split())
-        names, _, _ = read_tags()
+        names, _, _, clips = read_tags()
         turns = grouped[cluster_id]
-        heard = samples(turns)
+        heard = samples([s for s in turns if s["turn_id"] not in clips])
 
         def spans(chosen) -> dict:
             # Absolute times, so the tag survives new transcripts and boundaries;
@@ -338,7 +378,8 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)
         # Next: the first unskipped cluster; skipped ones only come round again
         # once everything else is done, and never straight back to this one.
-        todo, later = unnamed(grouped, *read_tags())
+        names, mixed, skipped, _ = read_tags()
+        todo, later = unnamed(grouped, names, mixed, skipped)
         following = [c for c in todo + later if c != cluster_id]
         return RedirectResponse(f"/cluster/{quote(following[0])}" if following else "/", status_code=303)
 
@@ -350,7 +391,7 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         if not logged_in(request):
             return RedirectResponse("/login", status_code=303)
         grouped = load_clusters()
-        names, _, _ = read_tags()
+        names, _, _, _ = read_tags()
         clusters = person_clusters(grouped, names, person)
         if not clusters:
             return RedirectResponse("/", status_code=303)
@@ -379,8 +420,8 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
             return RedirectResponse("/login", status_code=303)
         form = parse_qs((await request.body()).decode())
         new_name = " ".join(form.get("name", [""])[0].split())
-        names, _, _ = read_tags()
-        if not new_name or new_name == person or person not in names.values():
+        names, _, _, clips = read_tags()
+        if not new_name or new_name == person or person not in {*names.values(), *clips.values()}:
             return RedirectResponse(f"/person/{quote(person, safe='')}", status_code=303)
         append_tag({"type": "rename", "from": person, "to": new_name})
         return RedirectResponse(f"/person/{quote(new_name, safe='')}", status_code=303)

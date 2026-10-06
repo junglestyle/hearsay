@@ -46,8 +46,8 @@ CREATE TABLE turns (
 -- The operator's labels and tags as they apply to the current turns.
 CREATE TABLE operator_input (
     turn_id TEXT NOT NULL,
-    kind TEXT NOT NULL,              -- label | name | mixed | skip
-    value TEXT                       -- owner / not_owner / unsure for label, the name for name
+    kind TEXT NOT NULL,              -- label | name | clip | mixed | skip
+    value TEXT                       -- owner / not_owner / unsure for label, the name for name and clip
 );
 """
 
@@ -57,6 +57,7 @@ class OperatorInput(NamedTuple):
     names: dict[str, str]            # turn_id -> name
     mixed: set[str]
     skipped: set[str]
+    clips: dict[str, str]            # turn_id -> name, for a clip tagged on its own
 
 
 def split_turns(segments: list[dict]) -> list[dict]:
@@ -191,7 +192,7 @@ def resolve(db: sqlite3.Connection, labels_text: str, tags_text: str) -> Operato
                     hits.append(turn_id)
         return hits
 
-    result = OperatorInput({}, {}, set(), set())
+    result = OperatorInput({}, {}, set(), set(), {})
     for line in labels_text.splitlines():
         record = json.loads(line)
         for turn_id in covered(record):
@@ -201,15 +202,20 @@ def resolve(db: sqlite3.Connection, labels_text: str, tags_text: str) -> Operato
         if record["type"] == "rename":
             # A person, not turns: every turn named "from" so far becomes "to",
             # in any cluster. Renaming onto an existing name merges the two.
-            for turn_id, name in list(result.names.items()):
-                if name == record["from"]:
-                    result.names[turn_id] = record["to"]
+            for tagged in (result.names, result.clips):
+                for turn_id, name in list(tagged.items()):
+                    if name == record["from"]:
+                        tagged[turn_id] = record["to"]
             continue
         for turn_id in covered(record):
             if record["type"] == "name" and record["name"]:
                 result.names[turn_id] = record["name"]
             elif record["type"] == "name":
                 result.names.pop(turn_id, None)  # the operator took a name back
+            elif record["type"] == "clip" and record["name"]:
+                result.clips[turn_id] = record["name"]
+            elif record["type"] == "clip":
+                result.clips.pop(turn_id, None)
             elif record["type"] == "mixed":
                 result.mixed.add(turn_id)
             elif record["type"] == "skip":
@@ -232,6 +238,7 @@ def record_operator_input(db_path: Path, labels_dir: Path) -> dict:
         found = resolve(db, *read_operator_files(labels_dir))
         rows = [(t, "label", v) for t, v in found.labels.items()]
         rows += [(t, "name", v) for t, v in found.names.items()]
+        rows += [(t, "clip", v) for t, v in found.clips.items()]
         rows += [(t, "mixed", None) for t in found.mixed] + [(t, "skip", None) for t in found.skipped]
         db.executemany("INSERT INTO operator_input VALUES (?,?,?)", sorted(rows, key=lambda r: (r[0], r[1])))
         db.commit()

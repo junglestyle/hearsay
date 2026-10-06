@@ -177,6 +177,11 @@ def group_people(db_path: Path) -> dict:
     db = sqlite3.connect(db_path)
     try:
         names = dict(db.execute("SELECT turn_id, value FROM operator_input WHERE kind = 'name'"))
+        # A clip the operator tagged on its own in the portal is what was heard
+        # in that one turn, whatever its diarized speaker: a cough or a video
+        # in someone's speaker, or a second person. It stays out of the
+        # speaker's voice and goes to the stream as tagged.
+        clips = dict(db.execute("SELECT turn_id, value FROM operator_input WHERE kind = 'clip'"))
         # Any turn marked mixed, inherited ones too, marks its whole diarized speaker.
         mixed = set(db.execute(
             "SELECT t.conversation_id, t.diar_speaker FROM operator_input oi JOIN turns t ON t.turn_id = oi.turn_id"
@@ -191,6 +196,7 @@ def group_people(db_path: Path) -> dict:
             " AND ts.basis IN ('voice', 'channel') AND ts.embedding IS NOT NULL"
             " ORDER BY ts.turn_id"
         ).fetchall()
+        rows = [r for r in rows if r[0] not in clips]
         groups, vectors, speakers = speaker_vectors(rows, mixed)
         # A voice split off a speaker that the operator hasn't named yet may
         # join other unnamed speakers but no named person until they name
@@ -228,6 +234,8 @@ def group_people(db_path: Path) -> dict:
             " JOIN turns t ON t.turn_id = ts.turn_id WHERE ts.label = 'not_owner'"
             " AND (ts.basis = 'diarization' OR (ts.basis = 'channel' AND ts.embedding IS NULL))"
         ):
+            if turn_id in clips:
+                continue
             found = speaker_cluster.get((conversation_id, diar_speaker))
             if found is not None:
                 members[found[0]].append(turn_id)
@@ -238,6 +246,8 @@ def group_people(db_path: Path) -> dict:
         for c, turn_ids in members.items():
             person, conflict = cluster_name(named_by[c], names)
             out += [(t, min(turn_ids), person, int(conflict), int(t in split)) for t in turn_ids]
+        out += [(t, t, clips[t], 0, 0) for (t,) in db.execute("SELECT turn_id FROM turn_speakers WHERE label = 'not_owner'")
+                if t in clips]
 
         db.executescript(SCHEMA)
         db.executemany("INSERT INTO turn_people VALUES (?,?,?,?,?)", sorted(out))

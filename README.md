@@ -205,7 +205,9 @@ address, or the Hearsay app's Voices tab, which shows the same portal and
 logs in with the app's capture token. Each cluster plays a few samples. Type a name (reusing a name merges
 into that person), mark it as more than one person, or skip it for now: skipped
 clusters move to their own list and come round again after the rest. If you
-can't tell who it is (noise, several voices), skip rather than guess. A named
+can't tell who it is (noise, several voices), skip rather than guess. A
+single clip that isn't the speaker (a cough, a video, someone else) can be
+tagged on its own, under its player: only that turn takes the tag. A named
 cluster can be renamed, or its name forgotten, from its page; a person can be
 renamed everywhere at once from theirs (renaming onto an existing name merges
 the two). Names starting with `_` (`_noise`, `_media`, `_stranger`) are for

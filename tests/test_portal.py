@@ -183,3 +183,27 @@ def test_renaming_a_person_renames_every_cluster_at_once(portal):
     # cluster pages didn't sample come back to be named.
     assert db.execute("SELECT DISTINCT person FROM turn_people ORDER BY 1").fetchall() == [(None,), ("_media",)]
     db.close()
+
+
+def test_a_clip_tagged_on_its_own_keeps_its_tag_and_leaves_the_cluster_alone(portal):
+    client, db_path, labels_dir = portal
+    log_in(client)
+    db = sqlite3.connect(db_path)
+    cluster_a = db.execute("SELECT cluster FROM turn_people WHERE turn_id = 'a0'").fetchone()[0]
+    db.close()
+
+    # A cough in Alice's speaker, and a clip that turns out to be someone else.
+    client.post(f"/cluster/{cluster_a}/clip", data={"turn_id": "a0", "name": "_noise"})
+    client.post(f"/cluster/{cluster_a}/clip", data={"turn_id": "a2", "name": "Bob"})
+    assert "To name (2)" in client.get("/").text  # a clip doesn't name its cluster
+    page = client.get(f"/cluster/{cluster_a}").text
+    assert "/audio/a6" in page and "_noise" in page  # a fresh sample takes the clip's place
+    client.post(f"/cluster/{cluster_a}/clip", data={"turn_id": "a2"})  # taken back
+    client.post(f"/cluster/{cluster_a}", data={"action": "name", "name": "Alice"})
+
+    reprocess_people(db_path, labels_dir)
+    db = sqlite3.connect(db_path)
+    people = dict(db.execute("SELECT turn_id, person FROM turn_people"))
+    db.close()
+    assert people["a0"] == "_noise"
+    assert {people[s] for s in ["a2", "a4", "a6"]} == {"Alice"}
