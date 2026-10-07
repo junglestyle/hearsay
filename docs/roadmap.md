@@ -299,3 +299,33 @@ in tags.jsonl. It spreads beyond home only as media elsewhere is tagged.
 Done when: taken media hints are rarely undone, and they measurably cut the
 time spent tagging media.
 
+## 16. The owner's tone of voice
+
+How the owner sounded, per turn: arousal, valence and dominance from a
+dimensional speech emotion model run locally (audeering's wav2vec2 tuned on
+MSP-Podcast, natural speech rather than acted). Like `owner_similarity`, a
+property of the audio, not of what was said, and since audio never leaves
+Hearsay, no consumer could compute it. Text sentiment stays downstream.
+
+The idea comes from Manfred Clynes' sentics: an emotion has a
+characteristic shape in time. His sentograph measurements don't carry over
+to voice, so the shape is a later question (does the owner's arousal
+contour across a conversation say more than each turn's number?), not the
+method.
+
+- Owner turns only, at least `MIN_TURN` long with `MIN_COVERAGE` of real
+  audio, cut the way speaker embeddings are. Other people's emotional state
+  is not inferred: they didn't agree to it, and one known voice gives a
+  real baseline.
+- Run after speaker labels in reprocess, cached by audio content. On the
+  NAS CPU first; on the dev box GPU only if the hourly run gets slow.
+- The stream gains an optional `affect` {arousal, valence, dominance} on
+  owner utterances. Additive, so `format_version` stays 1; tell Idea
+  Machine.
+- Arousal from voice is usually reliable; valence much less so. Checked
+  blind by ear like inherited labels: the operator rates a random sample of
+  turns calm, neutral or heated without seeing the scores.
+
+Done when: owner turns in the stream carry affect, and arousal agrees with
+the operator's blind ratings well enough to be worth showing downstream. If
+it doesn't, the slice stops there.
