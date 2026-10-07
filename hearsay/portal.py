@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, quote
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from hearsay.media import HINT as MEDIA_HINT
 from hearsay.people import cluster_name
 from hearsay.places import read_places, unnamed_spots
 from hearsay.turns import read_operator_files, resolve, wall
@@ -186,6 +187,16 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             db.close()
         return places, people
 
+    def media_score(turn_ids: list[str]) -> float | None:
+        """How much a cluster sounds like the media the operator has tagged (hearsay/media.py)."""
+        db = connect()
+        try:
+            [(score,)] = db.execute(f"SELECT avg(score) FROM turn_media WHERE turn_id IN ({','.join('?' * len(turn_ids))})",
+                                    turn_ids).fetchall()
+        finally:
+            db.close()
+        return score
+
     def unnamed(grouped, names, mixed, skipped) -> tuple[list[str], list[str]]:
         """Clusters still to name, largest first: (not skipped, skipped)."""
         todo, later = [], []
@@ -332,6 +343,10 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             hint = (f"<p class='muted'>Heard at {html.escape(', '.join(places))}:</p>" + "".join(
                 f"<button type='submit' name='suggested' value='{html.escape(p)}' formnovalidate>{html.escape(p)}</button>"
                 for p in suggested))
+        score = media_score([s["turn_id"] for s in turns]) if not person else None
+        if score is not None and score >= MEDIA_HINT:
+            hint += ("<p class='muted'>Sounds like the TV or video you've tagged before:</p>"
+                     "<button type='submit' name='suggested' value='_media' formnovalidate>Looks like media: _media</button>")
         categories = {"_noise", "_media", "_stranger"}
         others = sorted(set(names.values()) | set(clips.values()) | categories)
         known = "".join(f"<option value='{html.escape(n)}'>" for n in suggested + [n for n in others if n not in suggested])
@@ -382,8 +397,9 @@ A clip that isn't this speaker (a cough, a video, someone else) can be tagged on
         form = parse_qs((await request.body()).decode())
         action = form.get("action", [""])[0]
         name = " ".join(form.get("name", [""])[0].split())
-        # A person offered because they were heard at this cluster's places:
-        # marked, so how often that hint is taken can be counted.
+        # A name offered by a hint (people heard at this cluster's places, or
+        # _media when it sounds like tagged media): marked with which hint, so
+        # how often each is taken can be counted.
         suggested = " ".join(form.get("suggested", [""])[0].split())
         if suggested:
             action, name = "name", suggested
@@ -411,7 +427,7 @@ A clip that isn't this speaker (a cough, a video, someone else) can be tagged on
                 # it is put on the whole cluster as it is now.
                 chosen = turns
             append_tag({"type": "name", **spans(chosen), "name": name if action == "name" else None}
-                       | ({"via": "place"} if suggested else {}))
+                       | ({"via": "media" if suggested == "_media" else "place"} if suggested else {}))
         else:
             return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)
         # Next: the first unskipped cluster; skipped ones only come round again

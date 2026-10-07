@@ -86,6 +86,10 @@ operator names a cluster in the portal, offer the people heard at the
 conversation's places first. Voice stays the judge: a place never names
 anyone on its own, and never overrides a voice label or the operator's names.
 
+Slice 15 (media hint) is built and being measured alongside 14: a cluster
+that sounds like the media the operator tagged offers `_media` for one tap
+(`hearsay/media.py`), never tagged on its own.
+
 Slice 13 (where a conversation happened) is done: the iPhone app samples the
 owner's location while recording (every 2 minutes, records in the capture
 upload, `hearsay/capture.py`), and each conversation in the stream lists the

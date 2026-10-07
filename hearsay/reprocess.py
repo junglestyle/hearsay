@@ -23,6 +23,7 @@ from hearsay.capture import load_captures
 from hearsay.conversations import find_conversations
 from hearsay.imports import load_imports
 from hearsay.parse import ParseFailed, rebuild
+from hearsay.media import score_media
 from hearsay.people import group_people
 from hearsay.places import find_places
 from hearsay.speakers import label_speakers
@@ -53,6 +54,7 @@ def run(raw_dir: Path, db_path: Path, audio_dir: Path, labels_dir: Path, model_d
         report("Operator labels and names, matched to turns:", record_operator_input(staging, labels_dir))
         report("Speaker embeddings and labels:", label_speakers(raw_dir, staging, labels_dir, model_dir, cache))
         report("Anonymous speakers and names:", group_people(staging))
+        report("Media hints, learned from the operator's tags:", score_media(staging))
         record_run(staging)
         os.replace(staging, db_path)
     finally:

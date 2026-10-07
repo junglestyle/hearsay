@@ -276,3 +276,26 @@ label or the operator's names.
 
 Done when: naming a cluster in the portal offers the people heard at that
 place first, and that measurably saves the operator time.
+
+## 15. Media hint
+
+TV and video dialogue is a large share of other voices (on 2026-10-07, 85 of
+346 minutes were tagged `_media`), and each evening of it is tagged by hand.
+Measured first, leave one conversation out against those tags: off-the-shelf
+sound-event models barely beat chance, because the media here is dialogue,
+not music (AudioSet's Music class scored those turns lower than people, AUC
+0.30; Television 0.55, Radio 0.70; CLAP prompts 0.39), and little of the
+`_noise` was music either. Speaker embeddings, which carry the channel as
+well as the voice, separated it almost completely (AUC 0.98, 94% of media
+minutes at under 1% of people's speech), but only for the one TV at home:
+media elsewhere went unmatched.
+
+So it is a hint, not a tag (`hearsay/media.py`): each reprocess learns from
+the operator's own tags, and a cluster that averages 0.8 or more offers
+`_media` for one tap; at that bar 5 of 8 media clusters and none of 21 named
+people's would have been offered it. Taken hints are marked `"via": "media"`
+in tags.jsonl. It spreads beyond home only as media elsewhere is tagged.
+
+Done when: taken media hints are rarely undone, and they measurably cut the
+time spent tagging media.
+

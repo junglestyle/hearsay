@@ -12,6 +12,7 @@ pytest.importorskip("numpy")
 
 from hearsay.assemble import SCHEMA as ASSEMBLE_SCHEMA  # noqa: E402
 from hearsay.parse import SCHEMA as PARSE_SCHEMA  # noqa: E402
+from hearsay.media import SCHEMA as MEDIA_SCHEMA  # noqa: E402
 from hearsay.people import group_people  # noqa: E402
 from hearsay.places import SCHEMA as PLACES_SCHEMA  # noqa: E402
 from hearsay.portal import create_app  # noqa: E402
@@ -40,7 +41,7 @@ def portal(tmp_path):
     rng = random.Random(0)
     voices = [unit([rng.gauss(0, 1) for _ in range(192)]) for _ in range(2)]
     db = sqlite3.connect(db_path)
-    db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA + PLACES_SCHEMA)
+    db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA + PLACES_SCHEMA + MEDIA_SCHEMA)
     db.execute("INSERT INTO conversation_audio VALUES ('c1', '2026-01-01T00:00:00+00:00', 40, 1, 'c1.wav', 'sha')")
     for idx in range(8):
         turn_id = f"{'ab'[idx % 2]}{idx}"
@@ -253,3 +254,18 @@ def test_people_heard_at_a_cluster_s_place_are_offered_for_one_tap(portal):
     client.post(f"/cluster/{cluster_a}", data={"suggested": "Sam"})
     record = json.loads((labels_dir / "tags.jsonl").read_text().splitlines()[-1])
     assert (record["name"], record["via"]) == ("Sam", "place")  # counted, to see if the hint saves time
+
+
+def test_a_cluster_that_sounds_like_tagged_media_offers_media_for_one_tap(portal):
+    client, db_path, labels_dir = portal
+    log_in(client)
+    db = sqlite3.connect(db_path)
+    cluster_a = db.execute("SELECT cluster FROM turn_people WHERE turn_id = 'a0'").fetchone()[0]
+    db.executemany("INSERT INTO turn_media VALUES (?, ?)", [(f"a{i}", 0.93) for i in (0, 2, 4, 6)])
+    db.commit()
+    db.close()
+
+    assert "Looks like media" in client.get(f"/cluster/{cluster_a}").text
+    client.post(f"/cluster/{cluster_a}", data={"suggested": "_media"})
+    record = json.loads((labels_dir / "tags.jsonl").read_text().splitlines()[-1])
+    assert (record["name"], record["via"], len(record["at"])) == ("_media", "media", 4)  # a category takes the whole cluster
