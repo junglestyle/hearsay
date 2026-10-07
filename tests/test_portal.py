@@ -13,6 +13,7 @@ pytest.importorskip("numpy")
 from hearsay.assemble import SCHEMA as ASSEMBLE_SCHEMA  # noqa: E402
 from hearsay.parse import SCHEMA as PARSE_SCHEMA  # noqa: E402
 from hearsay.people import group_people  # noqa: E402
+from hearsay.places import SCHEMA as PLACES_SCHEMA  # noqa: E402
 from hearsay.portal import create_app  # noqa: E402
 from hearsay.speakers import SCHEMA as SPEAKERS_SCHEMA  # noqa: E402
 from hearsay.turns import SCHEMA as TURNS_SCHEMA, record_operator_input  # noqa: E402
@@ -39,7 +40,7 @@ def portal(tmp_path):
     rng = random.Random(0)
     voices = [unit([rng.gauss(0, 1) for _ in range(192)]) for _ in range(2)]
     db = sqlite3.connect(db_path)
-    db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA)
+    db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA + PLACES_SCHEMA)
     db.execute("INSERT INTO conversation_audio VALUES ('c1', '2026-01-01T00:00:00+00:00', 40, 1, 'c1.wav', 'sha')")
     for idx in range(8):
         turn_id = f"{'ab'[idx % 2]}{idx}"
@@ -229,3 +230,26 @@ def test_a_spot_where_the_owner_spent_time_can_be_named(portal):
     assert "Nowhere new." in page and "<strong>Chill Room</strong>" in page
     [record] = [json.loads(line) for line in (labels_dir / "places.jsonl").read_text().splitlines()]
     assert (record["type"], record["name"], record["latitude"]) == ("place", "Chill Room", 26.12)
+
+
+def test_people_heard_at_a_cluster_s_place_are_offered_for_one_tap(portal):
+    client, db_path, labels_dir = portal
+    log_in(client)
+    db = sqlite3.connect(db_path)
+    cluster_a, cluster_b = (db.execute("SELECT cluster FROM turn_people WHERE turn_id = ?", (t,)).fetchone()[0]
+                            for t in ("a0", "b1"))
+    db.close()
+    assert "Heard at" not in client.get(f"/cluster/{cluster_a}").text  # no place yet, no hint
+
+    client.post(f"/cluster/{cluster_b}", data={"action": "name", "name": "Sam"})
+    reprocess_people(db_path, labels_dir)
+    db = sqlite3.connect(db_path)
+    db.execute("INSERT INTO conversation_places VALUES ('c1', 'Blind Monk', 0, 40)")
+    db.commit()
+    db.close()
+
+    page = client.get(f"/cluster/{cluster_a}").text
+    assert "Heard at Blind Monk" in page and "name='suggested' value='Sam'" in page
+    client.post(f"/cluster/{cluster_a}", data={"suggested": "Sam"})
+    record = json.loads((labels_dir / "tags.jsonl").read_text().splitlines()[-1])
+    assert (record["name"], record["via"]) == ("Sam", "place")  # counted, to see if the hint saves time

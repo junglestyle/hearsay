@@ -41,6 +41,8 @@ SESSION_SECONDS = 30 * 24 * 3600
 SAMPLES = 3
 # Smaller clusters (mostly single noisy turns) aren't offered for naming.
 MIN_TAG_CLUSTER = 3
+# People offered for one tap on a cluster's page: those heard most at its places.
+SUGGESTIONS = 5
 
 CLUSTERS_SQL = """
 SELECT tp.turn_id, tp.cluster, tp.split, t.conversation_id, t.start, t.end, ca.wav_file, ca.zero_at
@@ -161,6 +163,28 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         for row in rows:
             grouped.setdefault(row["cluster"], []).append(row)
         return dict(sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])))
+
+    def heard_at_places(conversation_ids: set[str]) -> tuple[list[str], list[str]]:
+        """The named places these conversations happened at, and the people heard
+        in any conversation at those places, most heard first. A hint for the
+        operator only: a place never names anyone on its own."""
+        db = connect()
+        try:
+            ids = sorted(conversation_ids)
+            places = [p for (p,) in db.execute(
+                f"SELECT DISTINCT place FROM conversation_places WHERE conversation_id IN ({','.join('?' * len(ids))})"
+                " ORDER BY place", ids)]
+            if not places:
+                return [], []
+            people = [p for p, _ in db.execute(
+                "SELECT tp.person, sum(t.end - t.start) FROM turn_people tp JOIN turns t ON t.turn_id = tp.turn_id"
+                " WHERE t.conversation_id IN (SELECT conversation_id FROM conversation_places"
+                f" WHERE place IN ({','.join('?' * len(places))}))"
+                " AND tp.person IS NOT NULL AND tp.person NOT LIKE '\\_%' ESCAPE '\\'"
+                " GROUP BY tp.person ORDER BY 2 DESC LIMIT ?", [*places, SUGGESTIONS])]
+        finally:
+            db.close()
+        return places, people
 
     def unnamed(grouped, names, mixed, skipped) -> tuple[list[str], list[str]]:
         """Clusters still to name, largest first: (not skipped, skipped)."""
@@ -302,9 +326,15 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         tagged_clips = "".join(player(s, clips[s["turn_id"]]) for s in turns if s["turn_id"] in clips)
         if tagged_clips:
             tagged_clips = "<h2>Tagged on their own</h2>" + tagged_clips
+        places, suggested = heard_at_places({s["conversation_id"] for s in turns})
+        hint = ""
+        if suggested:
+            hint = (f"<p class='muted'>Heard at {html.escape(', '.join(places))}:</p>" + "".join(
+                f"<button type='submit' name='suggested' value='{html.escape(p)}' formnovalidate>{html.escape(p)}</button>"
+                for p in suggested))
         categories = {"_noise", "_media", "_stranger"}
-        known = "".join(f"<option value='{html.escape(n)}'>"
-                        for n in sorted(set(names.values()) | set(clips.values()) | categories))
+        others = sorted(set(names.values()) | set(clips.values()) | categories)
+        known = "".join(f"<option value='{html.escape(n)}'>" for n in suggested + [n for n in others if n not in suggested])
         forget = ("<button type='submit' name='action' value='forget' formnovalidate>Forget this name</button>"
                   if person or conflict else "")
         return page("Hearsay cluster", f"""
@@ -314,6 +344,7 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
 A clip that isn't this speaker (a cough, a video, someone else) can be tagged on its own.</p>
 {players}
 <form method="post" action="/cluster/{quote(cluster_id)}">
+  {hint}
   <label for="name">Who is this? Reusing a name merges into that person.</label>
   <input id="name" name="name" list="known" autocomplete="off" autocapitalize="words">
   <datalist id="known">{known}</datalist>
@@ -351,6 +382,11 @@ A clip that isn't this speaker (a cough, a video, someone else) can be tagged on
         form = parse_qs((await request.body()).decode())
         action = form.get("action", [""])[0]
         name = " ".join(form.get("name", [""])[0].split())
+        # A person offered because they were heard at this cluster's places:
+        # marked, so how often that hint is taken can be counted.
+        suggested = " ".join(form.get("suggested", [""])[0].split())
+        if suggested:
+            action, name = "name", suggested
         names, _, _, clips = read_tags()
         turns = grouped[cluster_id]
         heard = samples([s for s in turns if s["turn_id"] not in clips])
@@ -374,7 +410,8 @@ A clip that isn't this speaker (a cough, a video, someone else) can be tagged on
                 # A category takes only tagged turns (hearsay/people.py), so
                 # it is put on the whole cluster as it is now.
                 chosen = turns
-            append_tag({"type": "name", **spans(chosen), "name": name if action == "name" else None})
+            append_tag({"type": "name", **spans(chosen), "name": name if action == "name" else None}
+                       | ({"via": "place"} if suggested else {}))
         else:
             return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)
         # Next: the first unskipped cluster; skipped ones only come round again

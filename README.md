@@ -216,6 +216,8 @@ categories, not people.
 The portal's Places page lists spots where the phone recorded and no named
 place is near (how long, which days, who was heard there, a map link); name
 them there. Only these names reach the stream, never coordinates.
+A cluster heard at a named place offers the people heard most at that place
+as one-tap names above its name box; a place never names anyone on its own.
 
 Names are stored on the segments you heard, in `/mnt/storage/hearsay/labels/`,
 so they survive reclustering and apply to every past conversation. The portal
