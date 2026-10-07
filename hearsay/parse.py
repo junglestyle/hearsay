@@ -104,6 +104,15 @@ CREATE TABLE marks (
     at REAL NOT NULL,                -- unix seconds, on the recorder's clock
     kind TEXT NOT NULL               -- start | end
 );
+
+-- Where the iPhone app was while recording (capture.locations).
+CREATE TABLE locations (
+    payload_path TEXT NOT NULL REFERENCES payloads(path),
+    at REAL NOT NULL,                -- unix seconds, on the phone's clock
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    accuracy REAL NOT NULL           -- metres, as iOS reported it
+);
 """
 
 
@@ -185,6 +194,7 @@ def parse_capture(db: sqlite3.Connection, path: str, body: bytes) -> None:
         if kind == capture.BUTTON:
             db.execute("INSERT INTO button_events VALUES (?,?,?)", (path, at, capture.button_event(data)))
     db.executemany("INSERT INTO marks VALUES (?,?,?)", [(path, at, mark) for at, mark in capture.marks(records)])
+    db.executemany("INSERT INTO locations VALUES (?,?,?,?,?)", [(path, *fix) for fix in capture.locations(records)])
 
 
 def load_payloads(db: sqlite3.Connection, raw_dir: Path) -> tuple[dict, list[str]]:

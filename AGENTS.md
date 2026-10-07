@@ -27,6 +27,10 @@ Each index entry also lists `taps`: when the owner marked that conversation
 with the pendant's button (a start mark, e.g. a self-note, kept even when
 it's short). The owner can also end a conversation with the button, which
 splits it there. Both are facts about the capture, not interpretations of it.
+So is `places`: the places the operator has named that the conversation
+happened at, in order, each {name, start, end}, from the phone's location
+while it recorded. Never coordinates; a spot nobody named is left out, and
+naming one later adds it retroactively.
 
 Speakers and text change after the fact (naming is retroactive, growing
 conversations are re-transcribed), so the unit of change is a conversation:
@@ -77,19 +81,22 @@ Guarantees consumers rely on (Idea Machine, `docs/ROADMAP.md` §3 there):
 
 ## Current slice
 
-Slice 12: retention (see the roadmap). Not started: all audio is kept until
-the operator says the models (diarization, voice thresholds, clustering) are
-tuned, because tuning re-runs over old audio. Then audio older than a rolling
-window is deleted, 90 days to start and revised down later. Past the window
-a conversation keeps its transcript, embeddings and names (naming and merging
-stay retroactive) but can no longer be re-transcribed or re-embedded.
+Slice 13: where a conversation happened (see the roadmap). The iPhone app
+samples the owner's location while it records (not paused, not muted): once
+when recording starts, then every minute, at about 100 m accuracy. Readings
+are records in the capture upload, kept in raw.
 
-- First resolve how the window fits "raw payloads are never deleted" and
-  "re-runnable from raw", and whether it deletes all audio or only
-  non-owner audio (raw audio mixes both in one stream, so the latter means
-  cutting spans).
-- Forgetting goes here too: a forgotten span leaves the stream on every
-  reprocess and is appended to `forgotten.json`.
+- Any new record kind is added on the NAS first (`hearsay/capture.py`).
+- The stream carries only places the operator named, never coordinates: a
+  reading is at the nearest named place within 100 m, and each conversation
+  lists its places in order with when it was at each.
+- Places are named in the portal (labels/places.jsonl), retroactively.
+- Location is not an interpretation of what was said; it is a fact about the
+  capture, like taps.
+
+Slice 12 (retention) waits until the operator says the models are tuned:
+then audio past a rolling window (90 days to start) is deleted, and a
+forgotten span leaves the stream and is listed in `forgotten.json`.
 
 Slice 11 (Mac audio capture) is done: a menu-bar app on the operator's
 personal Mac records the mic and the call as separate channels, only after
@@ -99,9 +106,9 @@ Each turn is attributed by the channel it's loud on (`with_channel` in
 machine is never used for capture or holds audio.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when non-owner audio is actually gone from disk, a forgotten span is
-gone from the stream and listed in `forgotten.json`, and nothing that
-depends on either breaks. Next: slice 13, where a conversation happened.
+Done when a day of conversations reaches the stream each with where it
+happened, and the phone's battery use for it is acceptable. Next: slice 14,
+place as a hint for who is speaking, and slice 12 once tuning is done.
 
 ## Engineering style
 

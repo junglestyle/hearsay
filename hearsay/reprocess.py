@@ -24,6 +24,7 @@ from hearsay.conversations import find_conversations
 from hearsay.imports import load_imports
 from hearsay.parse import ParseFailed, rebuild
 from hearsay.people import group_people
+from hearsay.places import find_places
 from hearsay.speakers import label_speakers
 from hearsay.stream import write_stream
 from hearsay.turns import build_turns, record_operator_input
@@ -46,6 +47,7 @@ def run(raw_dir: Path, db_path: Path, audio_dir: Path, labels_dir: Path, model_d
                load_imports(imports_dir, staging, db_path.parent / "imports-pcm"))
         report("Audio from the recorder:", load_captures(raw_dir, staging, db_path.parent / "capture-pcm"))
         report("Conversations found in the audio stream:", find_conversations(raw_dir, staging, cache))
+        report("Where conversations happened:", find_places(staging, labels_dir))
         report(f"Assembled conversation audio in {audio_dir}:", assemble(raw_dir, staging, audio_dir))
         report(f"Turns from transcripts in {transcripts_dir}:", build_turns(staging, transcripts_dir))
         report("Operator labels and names, matched to turns:", record_operator_input(staging, labels_dir))

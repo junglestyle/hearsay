@@ -10,7 +10,7 @@ sequence of records, little-endian:
 
     f64 at      unix seconds on the recorder's clock when it arrived (MIC,
                 SYSTEM: when the frame's audio began)
-    u8  kind    CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC or SYSTEM
+    u8  kind    CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM or LOCATION
     u16 length
     bytes       CONNECTED: the codec byte read on connect (19B10002); the
                 iPhone app also writes one on resuming from a pause, since
@@ -24,6 +24,9 @@ sequence of records, little-endian:
                 about it u8 (ACTION_* below), written after the event
                 MIC, SYSTEM: the Mac's samples in the frame u16, then one
                 Opus frame, mono at 16 kHz
+                LOCATION: where the iPhone app was while recording, latitude
+                f64 and longitude f64 in degrees, then the accuracy iOS
+                reported f32 in metres (hearsay/places.py)
 
 An audio notification is [index u16 LE][sub u8][Opus bytes]. index counts
 notifications and wraps at 65535; sub 0 starts a frame, and a frame split
@@ -66,7 +69,8 @@ from pathlib import Path
 
 from hearsay.assemble import SAMPLE_RATE
 
-CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM = 1, 2, 3, 4, 5, 6, 7
+CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM, LOCATION = 1, 2, 3, 4, 5, 6, 7, 8
+LOCATION_FIX = struct.Struct("<ddf")
 MAC_FRAME = struct.Struct("<H")
 RECORD_HEADER = struct.Struct("<dBH")
 STORED_HEADER = struct.Struct("<BQd")
@@ -122,7 +126,7 @@ def read_records(body: bytes) -> list[tuple[float, int, bytes]]:
             raise ValueError(f"truncated record header at byte {offset}")
         at, kind, length = RECORD_HEADER.unpack_from(body, offset)
         offset += RECORD_HEADER.size
-        if kind not in (CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM):
+        if kind not in (CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM, LOCATION):
             raise ValueError(f"unknown record kind {kind} at byte {offset}")
         if offset + length > len(body):
             raise ValueError(f"truncated record at byte {offset}")
@@ -150,6 +154,11 @@ def marks(records: list[tuple[float, int, bytes]]) -> list[tuple[float, str]]:
         return [(at, "start") for at, kind, data in records if kind == BUTTON and button_event(data) == SINGLE_TAP]
     names = {ACTION_START: "start", ACTION_END: "end"}
     return [(at, names[action]) for at, action in actions if action in names]
+
+
+def locations(records: list[tuple[float, int, bytes]]) -> list[tuple[float, float, float, float]]:
+    """(at, latitude, longitude, accuracy in metres) for each location reading in one upload."""
+    return [(at, *LOCATION_FIX.unpack(data)) for at, kind, data in records if kind == LOCATION]
 
 
 def frames(records: list[tuple[float, int, bytes]]) -> list[tuple[float, int, bytes | None]]:

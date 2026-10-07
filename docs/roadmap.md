@@ -238,10 +238,21 @@ receiver, kept with the raw payloads, and re-run from raw like everything
 else.
 
 Location is as personal as the audio, but unlike audio it reaches
-consumers. First resolve how precise it is in the stream (coordinates, or
-a place the operator has named such as "Chill Room"), how often the phone
-samples it (battery), and whether a conversation that moves gets one place
-or several.
+consumers. Decided 2026-10-06:
+
+- The phone samples while it records, that is while neither paused nor
+  muted: once when recording starts, then every minute, at about 100 m
+  accuracy (Wi-Fi and cell, cheap on battery). Each reading (latitude,
+  longitude, the accuracy iOS reports) is a record in the capture upload.
+- The stream carries only places the operator has named ("Chill Room"),
+  never coordinates. A reading is at the nearest named place within 100 m.
+- A conversation lists the named places it happened at, in order, each with
+  when it started and ended there, so one that moves has several. Unnamed
+  spots are left out.
+- Places are named in the portal, on a page of spots where the owner spent
+  time and no named place is near, each with how long, on which days, who
+  was heard there, and a map link. Names are the operator's durable input
+  (labels/places.jsonl), so naming is retroactive, like people's.
 
 Done when: a day of conversations reaches the stream each with where it
 happened, and the phone's battery use for it is acceptable.

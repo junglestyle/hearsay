@@ -5,6 +5,7 @@ from hearsay.assemble import SCHEMA as ASSEMBLE_SCHEMA
 from hearsay.conversations import SCHEMA as CONVERSATIONS_SCHEMA
 from hearsay.parse import SCHEMA as PARSE_SCHEMA
 from hearsay.people import SCHEMA as PEOPLE_SCHEMA
+from hearsay.places import SCHEMA as PLACES_SCHEMA
 from hearsay.speakers import SCHEMA as SPEAKERS_SCHEMA
 from hearsay.stream import write_stream
 from hearsay.turns import SCHEMA as TURNS_SCHEMA
@@ -29,7 +30,8 @@ TURNS = [
 def build(tmp_path):
     db_path = tmp_path / "h.sqlite"
     db = sqlite3.connect(db_path)
-    db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + CONVERSATIONS_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA + PEOPLE_SCHEMA)
+    db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + CONVERSATIONS_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA + PEOPLE_SCHEMA
+                    + PLACES_SCHEMA)
     db.execute("INSERT INTO conversations VALUES ('c1', ?, ?, 60, 0)", (T, T + 100))
     db.execute("INSERT INTO conversations VALUES ('c2', ?, ?, 40, 1)", (T + 500, T + 560))  # not transcribed yet
     db.execute("INSERT INTO conversation_audio VALUES ('c1', '2026-09-21T14:13:20+00:00', 100, 1, 'c1.wav', 'sha')")
