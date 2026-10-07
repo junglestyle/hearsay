@@ -1,6 +1,6 @@
 # hearsay
 
-Who said what, when. Turns always-on audio into attributed transcripts.
+Who said what, when. Turns recorded conversations into attributed transcripts.
 
 See [docs/roadmap.md](docs/roadmap.md).
 
