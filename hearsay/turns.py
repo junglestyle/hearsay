@@ -14,6 +14,7 @@ ones point into Omi's timeline and are placed via omi_timeline. A turn
 inherits a record when the record's span covers at least half of the turn.
 """
 
+import bisect
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -165,13 +166,19 @@ def omi_timeline(db: sqlite3.Connection) -> tuple[dict[str, float], dict[str, tu
 def resolve(db: sqlite3.Connection, labels_text: str, tags_text: str) -> OperatorInput:
     """The operator's labels and tags, matched to the current turns by absolute time."""
     zeros, segments = omi_timeline(db)
-    turns = [
-        (turn_id, datetime.fromisoformat(zero_at).timestamp() + start, datetime.fromisoformat(zero_at).timestamp() + end)
-        for turn_id, start, end, zero_at in db.execute(
-            "SELECT t.turn_id, t.start, t.end, ca.zero_at FROM turns t"
-            " JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id"
-        )
-    ]
+    turns = sorted(
+        ((turn_id, datetime.fromisoformat(zero_at).timestamp() + start, datetime.fromisoformat(zero_at).timestamp() + end)
+         for turn_id, start, end, zero_at in db.execute(
+             "SELECT t.turn_id, t.start, t.end, ca.zero_at FROM turns t"
+             " JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id"
+         )),
+        key=lambda t: t[1],
+    )
+    # A span can only cover turns that start before it ends and no more than
+    # the longest turn before it starts. Looking at just those, not every
+    # turn, keeps the portal quick: it resolves every tag on every page.
+    starts = [t[1] for t in turns]
+    longest = max((t[2] - t[1] for t in turns), default=0.0)
 
     def spans(record: dict) -> list[tuple[float, float]]:
         if "at" in record:
@@ -186,7 +193,8 @@ def resolve(db: sqlite3.Connection, labels_text: str, tags_text: str) -> Operato
     def covered(record: dict) -> list[str]:
         hits = []
         for start, end in spans(record):
-            for turn_id, t_start, t_end in turns:
+            nearby = turns[bisect.bisect_left(starts, start - longest):bisect.bisect_left(starts, end)]
+            for turn_id, t_start, t_end in nearby:
                 overlap = min(end, t_end) - max(start, t_start)
                 if t_end > t_start and overlap >= MIN_COVER * (t_end - t_start):
                     hits.append(turn_id)
