@@ -31,10 +31,11 @@ FORMAT_VERSION = 1
 
 UTTERANCES_SQL = """
 SELECT t.conversation_id, t.idx, t.start, t.end, t.text, t.diar_speaker, t.confidence,
-       ts.label, ts.basis, ts.owner_similarity, tp.person, tp.cluster, ca.zero_at
+       ts.label, ts.basis, ts.owner_similarity, tp.person, tp.cluster, ca.zero_at, ta.arousal
 FROM turns t
 JOIN turn_speakers ts ON ts.turn_id = t.turn_id
 LEFT JOIN turn_people tp ON tp.turn_id = t.turn_id
+LEFT JOIN turn_affect ta ON ta.turn_id = t.turn_id
 JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id
 ORDER BY t.conversation_id, t.start, t.idx
 """
@@ -88,7 +89,7 @@ def utterances(db: sqlite3.Connection) -> dict[str, list[dict]]:
     by_conversation = {}
     labels = {}  # (conversation, kind, voice) -> "anon A" / "stranger A"
     for (conversation_id, idx, start, end, text, diar_speaker, confidence,
-         label, basis, similarity, person, cluster, zero_at) in db.execute(UTTERANCES_SQL):
+         label, basis, similarity, person, cluster, zero_at, arousal) in db.execute(UTTERANCES_SQL):
         speaker = speaker_kind(label, person, basis)
         if speaker is None:
             continue
@@ -104,7 +105,7 @@ def utterances(db: sqlite3.Connection) -> dict[str, list[dict]]:
                 labels[key] = f"{'anon' if kind == 'anonymous' else 'stranger'} {letters(count)}"
             speaker_label = labels[key]
         zero = datetime.fromisoformat(zero_at).timestamp()
-        by_conversation.setdefault(conversation_id, []).append({
+        utterance = {
             "conversation_id": conversation_id,
             "utterance_id": f"{conversation_id}:{idx:04d}",
             "start": iso(zero + start),
@@ -114,7 +115,11 @@ def utterances(db: sqlite3.Connection) -> dict[str, list[dict]]:
             "text_confidence": round(confidence, 3) if confidence is not None else None,
             "speaker_confidence": {"basis": basis,
                                    "owner_similarity": round(similarity, 3) if similarity is not None else None},
-        })
+        }
+        # The owner's tone of voice, only where it was scored (hearsay/affect.py).
+        if arousal is not None and kind == "owner":
+            utterance["affect"] = {"arousal": round(arousal, 3)}
+        by_conversation.setdefault(conversation_id, []).append(utterance)
     return by_conversation
 
 

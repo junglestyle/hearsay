@@ -21,7 +21,10 @@ recording, the turn was loud on the mic, so the owner's, or on the call, so
 someone else's), diarization (the turn took its label from its diarized
 speaker in the conversation, not its own voice) or none. Speaker kinds: owner, person (named), anonymous (labeled
 per conversation, e.g. "anon A"), stranger, unknown. `_noise` and `_media`
-turns are left out; other `_` names are categories, not people.
+turns are left out; other `_` names are categories, not people. Owner
+utterances may also carry `affect` {arousal}: how calm or animated the owner
+sounded, about 0-1, from the audio alone (`hearsay/affect.py`); absent where
+the turn wasn't scored. Other people's tone is never inferred.
 
 Each index entry also lists `taps`: when the owner marked that conversation
 with the pendant's button (a start mark, e.g. a self-note, kept even when
@@ -80,6 +83,13 @@ Guarantees consumers rely on (Idea Machine, `docs/ROADMAP.md` §3 there):
 - Data directories and secrets are never committed.
 
 ## Current slice
+
+Slice 16: the owner's tone of voice (see the roadmap). Owner turns labeled by
+voice or channel are scored on reprocess (`hearsay/affect.py`, audeering's
+wav2vec2, CC-BY-NC-SA, baked into the worker image); only arousal reaches the
+stream, the one dimension checked by ear. Valence waits for its own check
+(tone without words, and a blind rating); dominance follows arousal for every
+voice measured and stays out. Other people's tone is never inferred.
 
 Slice 14: place as a hint for who is speaking (see the roadmap). When the
 operator names a cluster in the portal, offer the people heard at the

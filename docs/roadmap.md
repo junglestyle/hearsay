@@ -329,3 +329,15 @@ method.
 Done when: owner turns in the stream carry affect, and arousal agrees with
 the operator's blind ratings well enough to be worth showing downstream. If
 it doesn't, the slice stops there.
+
+Checked 2026-10-07, before building: the operator rated 30 of their own
+turns calm, neutral or heated without seeing scores, and arousal ranked them
+alike (Spearman 0.74; in 62 of 63 calm-heated pairs the heated turn scored
+higher). Dominance follows arousal for every voice measured (r 0.91-0.97 for
+the owner and four others, so the model's, not the owner's), and was left
+out of the stream: calm assertiveness, which it can't see, would need direct
+prosody measures (falling versus rising endings, rate, fillers) instead.
+Valence is computed but waits for two checks: whether it holds when the
+words are muffled away (low-pass filtered audio), and a blind rating of
+pleasant to unpleasant, ideally by someone other than the owner, since the
+point is how others hear them.

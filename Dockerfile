@@ -20,7 +20,11 @@ RUN pip install --no-cache-dir torch==2.14.0 torchaudio==2.11.0 --index-url http
 RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('speechbrain/spkrec-ecapa-voxceleb', revision='0f99f2d0ebe89ac095bcc5903c4dd8f72b367286', local_dir='/models/ecapa')" \
     && HF_HUB_OFFLINE=1 python -c "from pathlib import Path; from hearsay.speakers import load_model; load_model(Path('/models/ecapa'))" \
     && chmod -R a+rX /models
-ENV HEARSAY_MODEL_DIR=/models/ecapa HF_HUB_OFFLINE=1
+# The tone-of-voice model (hearsay/affect.py), weights only, pinned the same way.
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim', revision='6eba34a2485ea31cb03600241787c3a5edab8626', local_dir='/models/affect', allow_patterns=['*.json', '*.safetensors'])" \
+    && HF_HUB_OFFLINE=1 python -c "from pathlib import Path; from hearsay.affect import load_model; load_model(Path('/models/affect'))" \
+    && chmod -R a+rX /models
+ENV HEARSAY_MODEL_DIR=/models/ecapa HEARSAY_AFFECT_MODEL_DIR=/models/affect HF_HUB_OFFLINE=1
 # Last in the stage, so a new commit doesn't rebuild the layers above.
 ARG HEARSAY_COMMIT=unknown
 ENV HEARSAY_COMMIT=$HEARSAY_COMMIT

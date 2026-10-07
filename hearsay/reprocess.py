@@ -23,6 +23,7 @@ from hearsay.capture import load_captures
 from hearsay.conversations import find_conversations
 from hearsay.imports import load_imports
 from hearsay.parse import ParseFailed, rebuild
+from hearsay.affect import score_affect
 from hearsay.media import score_media
 from hearsay.people import group_people
 from hearsay.places import find_places
@@ -38,7 +39,7 @@ def report(title: str, counts: dict) -> None:
 
 
 def run(raw_dir: Path, db_path: Path, audio_dir: Path, labels_dir: Path, model_dir: Path,
-        transcripts_dir: Path, imports_dir: Path, stream_dir: Path) -> None:
+        transcripts_dir: Path, imports_dir: Path, stream_dir: Path, affect_model_dir: Path) -> None:
     staging = db_path.with_name(db_path.name + ".building")
     cache = Cache(db_path.parent / "cache.sqlite")
     try:
@@ -53,6 +54,7 @@ def run(raw_dir: Path, db_path: Path, audio_dir: Path, labels_dir: Path, model_d
         report(f"Turns from transcripts in {transcripts_dir}:", build_turns(staging, transcripts_dir))
         report("Operator labels and names, matched to turns:", record_operator_input(staging, labels_dir))
         report("Speaker embeddings and labels:", label_speakers(raw_dir, staging, labels_dir, model_dir, cache))
+        report("The owner's tone of voice:", score_affect(raw_dir, staging, affect_model_dir, cache))
         report("Anonymous speakers and names:", group_people(staging))
         report("Media hints, learned from the operator's tags:", score_media(staging))
         record_run(staging)
@@ -90,10 +92,10 @@ def record_run(db_path: Path) -> None:
 def main() -> None:
     env = {name: Path(os.environ[f"HEARSAY_{name.upper()}"]) for name in
            ("raw_dir", "db", "audio_dir", "labels_dir", "model_dir", "transcripts_dir", "imports_dir",
-            "stream_dir")}
+            "stream_dir", "affect_model_dir")}
     try:
         run(env["raw_dir"], env["db"], env["audio_dir"], env["labels_dir"], env["model_dir"],
-            env["transcripts_dir"], env["imports_dir"], env["stream_dir"])
+            env["transcripts_dir"], env["imports_dir"], env["stream_dir"], env["affect_model_dir"])
     except ParseFailed as e:
         print(e, file=sys.stderr)
         print(f"{env['db']} and {env['audio_dir']} left unchanged.", file=sys.stderr)

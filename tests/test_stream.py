@@ -1,6 +1,7 @@
 import json
 import sqlite3
 
+from hearsay.affect import SCHEMA as AFFECT_SCHEMA
 from hearsay.assemble import SCHEMA as ASSEMBLE_SCHEMA
 from hearsay.conversations import SCHEMA as CONVERSATIONS_SCHEMA
 from hearsay.parse import SCHEMA as PARSE_SCHEMA
@@ -31,7 +32,9 @@ def build(tmp_path):
     db_path = tmp_path / "h.sqlite"
     db = sqlite3.connect(db_path)
     db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + CONVERSATIONS_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA + PEOPLE_SCHEMA
-                    + PLACES_SCHEMA)
+                    + PLACES_SCHEMA + AFFECT_SCHEMA)
+    # The owner's tone of voice, scored on their turn only (hearsay/affect.py).
+    db.execute("INSERT INTO turn_affect VALUES ('c1:0000', 0.42, 0.45, 0.6)")
     db.execute("INSERT INTO conversations VALUES ('c1', ?, ?, 60, 0)", (T, T + 100))
     db.execute("INSERT INTO conversations VALUES ('c2', ?, ?, 40, 1)", (T + 500, T + 560))  # not transcribed yet
     db.execute("INSERT INTO conversation_audio VALUES ('c1', '2026-09-21T14:13:20+00:00', 100, 1, 'c1.wav', 'sha')")
@@ -71,6 +74,8 @@ def test_stream_attributes_speakers_and_leaves_out_non_speech(tmp_path):
     assert utterances[0]["start"] == "2026-09-21T14:13:20.000Z" and utterances[1]["end"] == "2026-09-21T14:13:35.000Z"
     assert utterances[0]["speaker_confidence"] == {"basis": "voice", "owner_similarity": 0.71}
     assert utterances[7]["speaker_confidence"] == {"basis": "diarization", "owner_similarity": None}
+    assert utterances[0]["affect"] == {"arousal": 0.42}  # only arousal: dominance and valence aren't checked
+    assert all("affect" not in u for u in utterances[1:])
     assert [(e["conversation_id"], e["transcribed"], e["open"], e["utterances"]) for e in index] == [
         ("c1", True, False, 8), ("c2", False, True, 0)]
 
