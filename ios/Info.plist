@@ -9,7 +9,7 @@
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Hearsay notes roughly where you are while it records, so conversations can say which place you named they happened at.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Hearsay records in the background, so it needs your location then too: roughly where you are, once a minute while recording.</string>
+    <string>Hearsay records in the background, so it needs your location then too: roughly where you are, every 2 minutes while recording.</string>
     <!-- Keeps the pendant connection, and recording, alive in the background;
          location lets readings continue there (allowsBackgroundLocationUpdates
          requires it). -->

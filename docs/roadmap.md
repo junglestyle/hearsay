@@ -241,7 +241,7 @@ Location is as personal as the audio, but unlike audio it reaches
 consumers. Decided 2026-10-06:
 
 - The phone samples while it records, that is while neither paused nor
-  muted: once when recording starts, then every minute, at about 100 m
+  muted: once when recording starts, then every 2 minutes, at about 100 m
   accuracy (Wi-Fi and cell, cheap on battery). Each reading (latitude,
   longitude, the accuracy iOS reports) is a record in the capture upload.
 - The stream carries only places the operator has named ("Chill Room"),
@@ -256,6 +256,13 @@ consumers. Decided 2026-10-06:
 
 Done when: a day of conversations reaches the stream each with where it
 happened, and the phone's battery use for it is acceptable.
+
+Done 2026-10-07: a night and a morning of conversations reached the stream
+at the operator's two named places (Blind Monk, Home), 1,085 of 1,096
+readings matched one, and no file in the stream holds a coordinate. Readings
+averaged 8 m accuracy (worst 195 m), sharper than the 100 m asked for. Battery
+use was acceptable at one reading a minute; sampling then went to every 2
+minutes, which loses nothing a conversation's places need.
 
 ## 14. Place as a hint for who is speaking
 

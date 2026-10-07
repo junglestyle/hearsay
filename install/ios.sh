@@ -167,7 +167,7 @@ confirm "Is it connected and sending?"
 say "Location while recording"
 # Manual: location permission is the operator's to grant, on the phone.
 cat <<MSG
-While it records, Hearsay notes roughly where you are once a minute, so
+While it records, Hearsay notes roughly where you are every 2 minutes, so
 conversations can say which place you named they happened at (the portal's
 Places page); coordinates never reach the stream. When iOS asks, allow
 location, and later choose "Change to Always Allow": the app records in the

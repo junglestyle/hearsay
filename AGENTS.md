@@ -81,18 +81,16 @@ Guarantees consumers rely on (Idea Machine, `docs/ROADMAP.md` §3 there):
 
 ## Current slice
 
-Slice 13: where a conversation happened (see the roadmap). The iPhone app
-samples the owner's location while it records (not paused, not muted): once
-when recording starts, then every minute, at about 100 m accuracy. Readings
-are records in the capture upload, kept in raw.
+Slice 14: place as a hint for who is speaking (see the roadmap). When the
+operator names a cluster in the portal, offer the people heard at the
+conversation's places first. Voice stays the judge: a place never names
+anyone on its own, and never overrides a voice label or the operator's names.
 
-- Any new record kind is added on the NAS first (`hearsay/capture.py`).
-- The stream carries only places the operator named, never coordinates: a
-  reading is at the nearest named place within 100 m, and each conversation
-  lists its places in order with when it was at each.
-- Places are named in the portal (labels/places.jsonl), retroactively.
-- Location is not an interpretation of what was said; it is a fact about the
-  capture, like taps.
+Slice 13 (where a conversation happened) is done: the iPhone app samples the
+owner's location while recording (every 2 minutes, records in the capture
+upload, `hearsay/capture.py`), and each conversation in the stream lists the
+places the operator named that it happened at (`hearsay/places.py`,
+labels/places.jsonl), never coordinates.
 
 Slice 12 (retention) waits until the operator says the models are tuned:
 then audio past a rolling window (90 days to start) is deleted, and a
@@ -106,9 +104,9 @@ Each turn is attributed by the channel it's loud on (`with_channel` in
 machine is never used for capture or holds audio.
 
 Test fixtures are synthetic and committed; real captures never enter the repo.
-Done when a day of conversations reaches the stream each with where it
-happened, and the phone's battery use for it is acceptable. Next: slice 14,
-place as a hint for who is speaking, and slice 12 once tuning is done.
+Done when naming a cluster in the portal offers the people heard at that
+place first, and that measurably saves the operator time. Next: slice 12,
+retention, once the operator says the models are tuned.
 
 ## Engineering style
 

@@ -2,14 +2,14 @@ import CoreLocation
 import Foundation
 
 /// Where the owner is while recording, for hearsay/places.py: one reading when
-/// recording starts (neither paused nor muted), then one a minute while it
+/// recording starts (neither paused nor muted), then one every 2 minutes while it
 /// lasts. About 100 m accuracy, which Wi-Fi and cell towers give without GPS,
 /// so it's cheap on battery. Each reading is a LOCATION record in the spool:
 /// latitude f64 LE, longitude f64 LE, then the accuracy iOS reports f32 LE in
 /// metres. The NAS reduces readings to places the operator named; coordinates
 /// never reach the stream.
 final class Location: NSObject, CLLocationManagerDelegate {
-    private static let interval: TimeInterval = 60
+    private static let interval: TimeInterval = 120
 
     private let spool: Spool
     private let manager = CLLocationManager()
