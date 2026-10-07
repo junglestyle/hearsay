@@ -4,10 +4,19 @@
 <dict>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Hearsay records audio from your Omi pendant over Bluetooth.</string>
-    <!-- Keeps the pendant connection, and recording, alive in the background. -->
+    <!-- Location: where conversations happened (Location.swift). Only places
+         the owner names reach the stream, never coordinates. -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Hearsay notes roughly where you are while it records, so conversations can say which place you named they happened at.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>Hearsay records in the background, so it needs your location then too: roughly where you are, once a minute while recording.</string>
+    <!-- Keeps the pendant connection, and recording, alive in the background;
+         location lets readings continue there (allowsBackgroundLocationUpdates
+         requires it). -->
     <key>UIBackgroundModes</key>
     <array>
         <string>bluetooth-central</string>
+        <string>location</string>
     </array>
     <!-- Uploads go to the NAS's capture receiver over plain HTTP on the
          tailnet, where WireGuard encrypts them. App Transport Security blocks

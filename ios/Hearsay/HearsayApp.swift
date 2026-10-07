@@ -17,6 +17,7 @@ final class Recorder {
     let pause: Pause
     let buttons: Buttons
     let uploader: Uploader
+    let location: Location
 
     private init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -30,13 +31,15 @@ final class Recorder {
         pause = Pause(root: support.appendingPathComponent("paused"), spool: spool, pendant: pendant)
         buttons = Buttons(pendant: pendant, pause: pause)
         uploader = Uploader(spool: spool)
+        location = Location(spool: spool)
 
         // Uploads cover a minute each; the NAS reprocesses hourly, so there's
         // no point in smaller ones. Timers only fire while the app runs,
         // which in the background is while the pendant is sending.
-        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [spool, pause] _ in
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [spool, pause, pendant, location] _ in
             spool.sync()
             pause.window?.sync()
+            location.tick(recording: !pause.paused && !pendant.muted)
         }
         Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [spool, pendant, pause] _ in
             spool.seal()

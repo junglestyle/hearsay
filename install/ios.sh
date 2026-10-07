@@ -164,4 +164,15 @@ should show "connected" with audio packets counted, and within two an upload
 MSG
 confirm "Is it connected and sending?"
 
+say "Location while recording"
+# Manual: location permission is the operator's to grant, on the phone.
+cat <<MSG
+While it records, Hearsay notes roughly where you are once a minute, so
+conversations can say which place you named they happened at (the portal's
+Places page); coordinates never reach the stream. When iOS asks, allow
+location, and later choose "Change to Always Allow": the app records in the
+background. Check: Settings > Hearsay > Location says Always.
+MSG
+confirm "Is location set to Always?"
+
 say "Recording from the phone. The next hourly reprocess on the NAS picks the uploads up."

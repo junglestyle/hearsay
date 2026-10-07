@@ -19,6 +19,10 @@ final class Spool {
     static let stored: UInt8 = 4
     /// What the app did about a button event (Buttons): event u8, outcome u8.
     static let action: UInt8 = 5
+    /// Where the phone was while recording (Location): latitude f64 LE,
+    /// longitude f64 LE, accuracy in metres f32 LE. Kinds 6 and 7 are the Mac
+    /// recorder's.
+    static let location: UInt8 = 8
 
     let dir: URL
     private let current: URL
