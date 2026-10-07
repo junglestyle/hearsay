@@ -108,3 +108,31 @@ def find_places(db_path: Path, labels_dir: Path) -> dict:
     return {"readings": len(readings), "named_places": len({s[0] for s in spots}),
             "readings_at_a_named_place": sum(1 for n in names if n),
             "conversations_with_a_place": len({r[0] for r in rows})}
+
+
+# Readings (about minutes) a spot needs before it's offered for naming.
+MIN_SPOT_READINGS = 3
+
+
+def unnamed_spots(readings: list[tuple[float, float, float]], spots: list[tuple[str, float, float]]) -> list[dict]:
+    """Where the owner spent time that no named place is near, most time first.
+
+    readings are (at, latitude, longitude). Each joins the first spot whose
+    centre is within RADIUS, or starts one; a spot's centre is the mean of
+    its readings.
+    """
+    found = []
+    for at, lat, lon in readings:
+        if nearest(lat, lon, spots):
+            continue
+        for spot in found:
+            if metres(lat, lon, spot["latitude"], spot["longitude"]) <= RADIUS:
+                spot["times"].append(at)
+                n = len(spot["times"])
+                spot["latitude"] += (lat - spot["latitude"]) / n
+                spot["longitude"] += (lon - spot["longitude"]) / n
+                break
+        else:
+            found.append({"latitude": lat, "longitude": lon, "times": [at]})
+    found = [s for s in found if len(s["times"]) >= MIN_SPOT_READINGS]
+    return sorted(found, key=lambda s: -len(s["times"]))

@@ -207,3 +207,25 @@ def test_a_clip_tagged_on_its_own_keeps_its_tag_and_leaves_the_cluster_alone(por
     db.close()
     assert people["a0"] == "_noise"
     assert {people[s] for s in ["a2", "a4", "a6"]} == {"Alice"}
+
+
+def test_a_spot_where_the_owner_spent_time_can_be_named(portal):
+    from hearsay.conversations import SCHEMA as CONVERSATIONS_SCHEMA
+    from hearsay.places import SCHEMA as PLACES_SCHEMA
+
+    client, db_path, labels_dir = portal
+    log_in(client)
+    db = sqlite3.connect(db_path)
+    db.executescript(CONVERSATIONS_SCHEMA + PLACES_SCHEMA)
+    db.executemany("INSERT INTO locations VALUES ('p', ?, 26.12, -80.14, 65)", [(1_790_000_000 + 60 * i,) for i in range(5)])
+    db.commit()
+    db.close()
+
+    page = client.get("/places").text
+    assert "About 5 min" in page and "maps.apple.com/?ll=26.12000,-80.14000" in page
+
+    client.post("/places", data={"action": "name", "name": "Chill Room", "latitude": "26.12", "longitude": "-80.14"})
+    page = client.get("/places").text
+    assert "Nowhere new." in page and "<strong>Chill Room</strong>" in page
+    [record] = [json.loads(line) for line in (labels_dir / "places.jsonl").read_text().splitlines()]
+    assert (record["type"], record["name"], record["latitude"]) == ("place", "Chill Room", 26.12)

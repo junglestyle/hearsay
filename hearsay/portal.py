@@ -32,6 +32,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from hearsay.people import cluster_name
+from hearsay.places import read_places, unnamed_spots
 from hearsay.turns import read_operator_files, resolve, wall
 
 COOKIE = "hearsay_session"
@@ -174,9 +175,9 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             (later if skipped & ids else todo).append(c)
         return todo, later
 
-    def append_tag(record: dict) -> None:
+    def append_tag(record: dict, path: Path = tags_path) -> None:
         record["tagged_at"] = datetime.now(timezone.utc).isoformat()
-        with open(tags_path, "a") as f:
+        with open(path, "a") as f:
             f.write(json.dumps(record) + "\n")
             f.flush()
             os.fsync(f.fileno())
@@ -258,7 +259,7 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         )
         return page("Hearsay speakers", f"""
 <h1>Speakers</h1>
-<p class="muted">{len(grouped)} clusters · {conflicts} with conflicting names</p>
+<p class="muted">{len(grouped)} clusters · {conflicts} with conflicting names · <a href="/places">Places</a></p>
 <h2>To name ({len(todo)})</h2><ul>{items(todo) or "<li class='muted'>Nothing left to name.</li>"}</ul>
 <h2>Skipped ({len(later)})</h2><ul>{items(later) or "<li class='muted'>None.</li>"}</ul>
 <h2>People ({len(people)})</h2><ul>{people_items or "<li class='muted'>None yet.</li>"}</ul>
@@ -425,6 +426,79 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
             return RedirectResponse(f"/person/{quote(person, safe='')}", status_code=303)
         append_tag({"type": "rename", "from": person, "to": new_name})
         return RedirectResponse(f"/person/{quote(new_name, safe='')}", status_code=303)
+
+    @app.get("/places")
+    async def show_places(request: Request) -> Response:
+        if not logged_in(request):
+            return RedirectResponse("/login", status_code=303)
+        spots = read_places(labels_dir)
+        db = connect()
+        try:
+            readings = db.execute("SELECT at, latitude, longitude FROM locations ORDER BY at").fetchall()
+            conversations = db.execute("SELECT conversation_id, start, end FROM conversations").fetchall()
+            heard = {}
+            for conversation_id, person in db.execute(
+                "SELECT DISTINCT t.conversation_id, tp.person FROM turn_people tp JOIN turns t USING (turn_id)"
+                " WHERE tp.person IS NOT NULL AND tp.person NOT LIKE '\\_%' ESCAPE '\\'"
+            ):
+                heard.setdefault(conversation_id, set()).add(person)
+            visited = dict(db.execute("SELECT place, count(DISTINCT conversation_id) FROM conversation_places GROUP BY place"))
+        finally:
+            db.close()
+
+        def maps(lat: float, lon: float, label: str) -> str:
+            return f"<a href='https://maps.apple.com/?ll={lat:.5f},{lon:.5f}&q={quote(label)}'>Open in Maps</a>"
+
+        named = ""
+        for name in sorted({n for n, _, _ in spots}):
+            _, lat, lon = next(sp for sp in spots if sp[0] == name)
+            named += (f"<li><strong>{html.escape(name)}</strong> <span class='muted'>"
+                      f"{visited.get(name, 0)} conversation(s) as of the last reprocess · {maps(lat, lon, name)}</span>"
+                      f"<form class='clip' method='post' action='/places'><input type='hidden' name='from' value='{html.escape(name)}'>"
+                      "<input name='name' placeholder='New name (an existing one merges them)' autocomplete='off'>"
+                      "<button type='submit' name='action' value='rename'>Rename</button>"
+                      "<button type='submit' name='action' value='forget' formnovalidate>Forget</button></form></li>")
+        unnamed = ""
+        for spot in unnamed_spots(readings, spots):
+            times = spot["times"]
+            days = sorted({datetime.fromtimestamp(at, timezone.utc).strftime("%b %-d") for at in times})
+            people = sorted({p for cid, start, end in conversations if any(start <= at <= end for at in times)
+                             for p in heard.get(cid, ())})
+            lat, lon = spot["latitude"], spot["longitude"]
+            unnamed += (f"<li>About {len(times)} min on {', '.join(days)} (UTC)"
+                        f"<div class='muted'>{('Heard: ' + html.escape(', '.join(people))) if people else 'Nobody named heard here.'}"
+                        f" · {maps(lat, lon, 'Unnamed place')}</div>"
+                        f"<form class='clip' method='post' action='/places'>"
+                        f"<input type='hidden' name='latitude' value='{lat:.6f}'><input type='hidden' name='longitude' value='{lon:.6f}'>"
+                        "<input name='name' placeholder='Name this place (an existing name adds to it)' autocomplete='off' required>"
+                        "<button type='submit' name='action' value='name'>Save place</button></form></li>")
+        return page("Hearsay places", f"""
+<p><a href="/">← Speakers</a></p>
+<h1>Places</h1>
+<p class="muted">Where conversations happened, from the phone's location while it records. Only names you give
+reach the stream, never coordinates; a reading counts as a place within 100 m of it.</p>
+<h2>To name</h2><ul>{unnamed or "<li class='muted'>Nowhere new.</li>"}</ul>
+<h2>Named</h2><ul>{named or "<li class='muted'>None yet.</li>"}</ul>""")
+
+    @app.post("/places")
+    async def tag_place(request: Request) -> Response:
+        if not logged_in(request):
+            return RedirectResponse("/login", status_code=303)
+        form = parse_qs((await request.body()).decode())
+
+        def field(key: str) -> str:
+            return " ".join(form.get(key, [""])[0].split())
+
+        action, name = field("action"), field("name")
+        places_path = labels_dir / "places.jsonl"
+        if action == "name" and name:
+            append_tag({"type": "place", "name": name, "latitude": float(field("latitude")),
+                        "longitude": float(field("longitude"))}, places_path)
+        elif action == "rename" and name and field("from") and name != field("from"):
+            append_tag({"type": "rename", "from": field("from"), "to": name}, places_path)
+        elif action == "forget" and field("from"):
+            append_tag({"type": "forget", "name": field("from")}, places_path)
+        return RedirectResponse("/places", status_code=303)
 
     @app.get("/audio/{turn_id}")
     async def audio(request: Request, turn_id: str) -> Response:

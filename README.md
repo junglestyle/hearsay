@@ -213,6 +213,10 @@ renamed everywhere at once from theirs (renaming onto an existing name merges
 the two). Names starting with `_` (`_noise`, `_media`, `_stranger`) are for
 categories, not people.
 
+The portal's Places page lists spots where the phone recorded and no named
+place is near (how long, which days, who was heard there, a map link); name
+them there. Only these names reach the stream, never coordinates.
+
 Names are stored on the segments you heard, in `/mnt/storage/hearsay/labels/`,
 so they survive reclustering and apply to every past conversation. The portal
 shows them immediately; the database picks them up on the next reprocess.
