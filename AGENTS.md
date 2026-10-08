@@ -203,13 +203,14 @@ All installation and deployment lives in `install/`, one script per target
 (e.g. `install/dev.sh`, `install/nas.sh`, `install/tunnel.sh`). Shared helpers
 go in `install/lib.sh`. No install scripts live outside `install/`.
 
-`README.md` is the orientation doc for installation: which script runs on
+`docs/install.md` is the orientation doc for installation (`README.md` is
+the project overview and links to it): which script runs on
 which host, in what order, and anything that happens between scripts
 (pre-flight checks, post-flight verification, operator actions that span
 targets). It links to scripts; it does not duplicate what they do.
 
 - Any step inside a single target belongs in that target's script. A
-  within-target step that only exists in the README or a chat is a bug.
+  within-target step that only exists in docs/install.md or a chat is a bug.
 - Each script is idempotent: re-running it on an installed system is safe and
   changes nothing that's already correct.
 - Steps that require the operator are still owned by the script: it prints
@@ -220,5 +221,5 @@ targets). It links to scripts; it does not duplicate what they do.
   script to run, rather than silently doing the other target's work.
 - If a change requires a new setup step, update the relevant script in the
   same change. If it affects order, hosts, or between-script actions, update
-  the README in the same change too.
+  docs/install.md in the same change too.
 - Secrets are read from an env file outside the repo, never written into it.

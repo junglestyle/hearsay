@@ -16,7 +16,7 @@ MAC_LOG="$HOME/Library/Logs/hearsay-mac.log"
 # bundle's copy, so that can't be compared).
 MAC_BUILT="$HOME/Library/Caches/hearsay/hearsay-mac.built"
 
-[ "$(uname)" = Darwin ] || die "this is for the Mac; see README.md for the other hosts"
+[ "$(uname)" = Darwin ] || die "this is for the Mac; see docs/install.md for the other hosts"
 [ "$(id -u)" -ne 0 ] || die "run as your user, not root: the recorder is a per-user launchd agent"
 major="$(sw_vers -productVersion | cut -d. -f1)"
 minor="$(sw_vers -productVersion | cut -d. -f2)"
