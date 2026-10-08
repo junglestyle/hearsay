@@ -9,7 +9,7 @@ source "$(dirname "$0")/lib.sh"
 IOS_ENV="$HOME/.config/hearsay/ios.env"
 IOS_BUILD="$HOME/Library/Caches/hearsay/ios-build"
 
-[ "$(uname)" = Darwin ] || die "this runs on the Mac; see README.md for the other hosts"
+[ "$(uname)" = Darwin ] || die "this runs on the Mac; see docs/install.md for the other hosts"
 [ "$(id -u)" -ne 0 ] || die "run as your user, not root"
 mkdir -p "$(dirname "$IOS_ENV")"
 
