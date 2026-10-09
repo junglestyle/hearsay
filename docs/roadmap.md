@@ -341,3 +341,52 @@ Valence is computed but waits for two checks: whether it holds when the
 words are muffled away (low-pass filtered audio), and a blind rating of
 pleasant to unpleasant, ideally by someone other than the owner, since the
 point is how others hear them.
+
+Valence, 2026-10-08: scored on the owner's 928 turns as is and low-pass
+filtered at 400 Hz (pitch, rhythm and loudness kept, words unintelligible),
+its ranking held 0.24, against arousal's 0.47 (the baseline: muffling is
+far from the clear speech the model learned on), and its part beyond
+arousal held 0.17. Most of what this model calls valence comes from the
+words or from energy, not from tone, so it stays out of the stream.
+
+## 17. How the owner holds a turn
+
+The owner wants to learn calm assertiveness: sounding settled and sure
+without raising energy. Slice 16's dominance can't see it (it follows
+arousal for every voice measured), so this measures the delivery directly,
+in terms the owner can act on. Like affect, properties of the owner's audio
+and timing, owner turns only, never other people's.
+
+Candidate measures, per owner turn:
+
+- Ending: whether the pitch falls or rises over the turn's last half second
+  (a statement that rises sounds like a question). A pitch tracker on the
+  turn's audio; no words needed.
+- Rate: words per second of speaking time, from Parakeet's word timings,
+  pauses left out.
+- Pauses: silent gaps over 250 ms between words, how many and how long, and
+  whether the turn trails off (its last word much quieter than the rest)
+  rather than ending firmly.
+- Disfluency: stutter events with their times, each with the speaking rate
+  in the seconds before it, since the owner's stutters come from speaking
+  quickly. Repeated words and restarts from the word timings (the same word
+  twice a fraction of a second apart, a word cut off and begun again),
+  fillers ("uh", "um") from the verbatim text, and perhaps sound
+  repetitions, prolongations and blocks heard in the audio by a model
+  trained on stuttering (SEP-28k), since Parakeet tidies many of those
+  away. It stays in Hearsay because it needs the timings and the audio,
+  which consumers never get, and it reads the form of the owner's speech,
+  not what they meant.
+
+Measured first, like affect. For ending, rate and pauses, the operator rates
+a blind sample of their calm turns (low arousal) as assertive, neutral or
+tentative, and each measure is checked against those ratings. For
+disfluency, the operator listens to detected events and marks each a real
+stutter or not, so each detector's precision is known. Only what holds up
+reaches the stream, as an optional `delivery` on owner utterances; additive,
+so `format_version` stays 1. What to do with it (trends, feedback) is
+downstream.
+
+Done when: the measures and detectors that hold up against the operator's
+ears are in the stream, at least one of them. If none does, the slice stops
+there.
