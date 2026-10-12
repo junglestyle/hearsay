@@ -24,7 +24,10 @@ per conversation, e.g. "anon A"), stranger, unknown. `_noise` and `_media`
 turns are left out; other `_` names are categories, not people. Owner
 utterances may also carry `affect` {arousal}: how calm or animated the owner
 sounded, about 0-1, from the audio alone (`hearsay/affect.py`); absent where
-the turn wasn't scored. Other people's tone is never inferred.
+the turn wasn't scored. Other people's tone is never inferred. They may also
+carry `delivery` {words_per_second, pauses, pause_seconds, stutters: [{kind
+(repeat, restart, filler), at, words_per_second_before}]}: measured from the
+word timings (`hearsay/delivery.py`), not judged; absent where not measured.
 
 Each index entry also lists `taps`: when the owner marked that conversation
 with the pendant's button (a start mark, e.g. a self-note, kept even when
@@ -83,6 +86,13 @@ Guarantees consumers rely on (Idea Machine, `docs/ROADMAP.md` §3 there):
 - Data directories and secrets are never committed.
 
 ## Current slice
+
+Slice 17: how the owner holds a turn (see the roadmap). Owner utterances
+carry `delivery`, from Parakeet's word timings (`hearsay/delivery.py`):
+speaking rate, pauses, and stutters (repeats, restarts, fillers) each with the
+speaking rate before it. Stutter detection was checked by ear (20 of 24
+real). No assertiveness label: ending pitch, rate, pauses and trailing off
+didn't match the owner's blind ratings of calm turns.
 
 Slice 16: the owner's tone of voice (see the roadmap). Owner turns labeled by
 voice or channel are scored on reprocess (`hearsay/affect.py`, audeering's

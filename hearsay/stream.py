@@ -31,11 +31,13 @@ FORMAT_VERSION = 1
 
 UTTERANCES_SQL = """
 SELECT t.conversation_id, t.idx, t.start, t.end, t.text, t.diar_speaker, t.confidence,
-       ts.label, ts.basis, ts.owner_similarity, tp.person, tp.cluster, ca.zero_at, ta.arousal
+       ts.label, ts.basis, ts.owner_similarity, tp.person, tp.cluster, ca.zero_at, ta.arousal,
+       td.words_per_second, td.pauses, td.pause_seconds, t.turn_id
 FROM turns t
 JOIN turn_speakers ts ON ts.turn_id = t.turn_id
 LEFT JOIN turn_people tp ON tp.turn_id = t.turn_id
 LEFT JOIN turn_affect ta ON ta.turn_id = t.turn_id
+LEFT JOIN turn_delivery td ON td.turn_id = t.turn_id
 JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id
 ORDER BY t.conversation_id, t.start, t.idx
 """
@@ -87,9 +89,15 @@ def letters(n: int) -> str:
 
 def utterances(db: sqlite3.Connection) -> dict[str, list[dict]]:
     by_conversation = {}
+    stutters = {}
+    for turn_id, at, kind, before in db.execute(
+        "SELECT turn_id, at, kind, words_per_second_before FROM turn_stutters ORDER BY turn_id, at"
+    ):
+        stutters.setdefault(turn_id, []).append((at, kind, before))
     labels = {}  # (conversation, kind, voice) -> "anon A" / "stranger A"
     for (conversation_id, idx, start, end, text, diar_speaker, confidence,
-         label, basis, similarity, person, cluster, zero_at, arousal) in db.execute(UTTERANCES_SQL):
+         label, basis, similarity, person, cluster, zero_at, arousal,
+         words_per_second, pauses, pause_seconds, turn_id) in db.execute(UTTERANCES_SQL):
         speaker = speaker_kind(label, person, basis)
         if speaker is None:
             continue
@@ -119,6 +127,13 @@ def utterances(db: sqlite3.Connection) -> dict[str, list[dict]]:
         # The owner's tone of voice, only where it was scored (hearsay/affect.py).
         if arousal is not None and kind == "owner":
             utterance["affect"] = {"arousal": round(arousal, 3)}
+        # How the owner delivered it (hearsay/delivery.py), where measured.
+        if words_per_second is not None and kind == "owner":
+            utterance["delivery"] = {
+                "words_per_second": words_per_second, "pauses": pauses, "pause_seconds": pause_seconds,
+                "stutters": [{"kind": k, "at": iso(zero + at), "words_per_second_before": before}
+                             for at, k, before in stutters.get(turn_id, [])],
+            }
         by_conversation.setdefault(conversation_id, []).append(utterance)
     return by_conversation
 

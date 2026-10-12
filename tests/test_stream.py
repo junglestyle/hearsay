@@ -3,6 +3,7 @@ import sqlite3
 
 from hearsay.affect import SCHEMA as AFFECT_SCHEMA
 from hearsay.assemble import SCHEMA as ASSEMBLE_SCHEMA
+from hearsay.delivery import SCHEMA as DELIVERY_SCHEMA
 from hearsay.conversations import SCHEMA as CONVERSATIONS_SCHEMA
 from hearsay.parse import SCHEMA as PARSE_SCHEMA
 from hearsay.people import SCHEMA as PEOPLE_SCHEMA
@@ -32,9 +33,11 @@ def build(tmp_path):
     db_path = tmp_path / "h.sqlite"
     db = sqlite3.connect(db_path)
     db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + CONVERSATIONS_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA + PEOPLE_SCHEMA
-                    + PLACES_SCHEMA + AFFECT_SCHEMA)
+                    + PLACES_SCHEMA + AFFECT_SCHEMA + DELIVERY_SCHEMA)
     # The owner's tone of voice, scored on their turn only (hearsay/affect.py).
     db.execute("INSERT INTO turn_affect VALUES ('c1:0000', 0.42, 0.45, 0.6)")
+    db.execute("INSERT INTO turn_delivery VALUES ('c1:0000', 4.1, 1, 0.6)")
+    db.execute("INSERT INTO turn_stutters VALUES ('c1:0000', 2.0, 'repeat', 4.8)")
     db.execute("INSERT INTO conversations VALUES ('c1', ?, ?, 60, 0)", (T, T + 100))
     db.execute("INSERT INTO conversations VALUES ('c2', ?, ?, 40, 1)", (T + 500, T + 560))  # not transcribed yet
     db.execute("INSERT INTO conversation_audio VALUES ('c1', '2026-09-21T14:13:20+00:00', 100, 1, 'c1.wav', 'sha')")
@@ -76,6 +79,9 @@ def test_stream_attributes_speakers_and_leaves_out_non_speech(tmp_path):
     assert utterances[7]["speaker_confidence"] == {"basis": "diarization", "owner_similarity": None}
     assert utterances[0]["affect"] == {"arousal": 0.42}  # only arousal: dominance and valence aren't checked
     assert all("affect" not in u for u in utterances[1:])
+    assert utterances[0]["delivery"] == {"words_per_second": 4.1, "pauses": 1, "pause_seconds": 0.6, "stutters": [
+        {"kind": "repeat", "at": "2026-09-21T14:13:22.000Z", "words_per_second_before": 4.8}]}
+    assert all("delivery" not in u for u in utterances[1:])
     assert [(e["conversation_id"], e["transcribed"], e["open"], e["utterances"]) for e in index] == [
         ("c1", True, False, 8), ("c2", False, True, 0)]
 

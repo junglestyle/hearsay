@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from hearsay.affect import SCHEMA as AFFECT_SCHEMA
 from hearsay.assemble import SCHEMA as ASSEMBLE_SCHEMA
+from hearsay.delivery import SCHEMA as DELIVERY_SCHEMA
 from hearsay.capture import LOCATION
 from hearsay.conversations import SCHEMA as CONVERSATIONS_SCHEMA
 from hearsay.parse import rebuild
@@ -35,7 +36,7 @@ def test_a_conversation_lists_the_named_places_it_happened_at(tmp_path):
     upload(raw, T + timedelta(minutes=20), "k-places", b"".join(readings))
     rebuild(raw, db_path)
     db = sqlite3.connect(db_path)
-    db.executescript(ASSEMBLE_SCHEMA + CONVERSATIONS_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA + PEOPLE_SCHEMA + AFFECT_SCHEMA)
+    db.executescript(ASSEMBLE_SCHEMA + CONVERSATIONS_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA + PEOPLE_SCHEMA + AFFECT_SCHEMA + DELIVERY_SCHEMA)
     db.execute("INSERT INTO conversations VALUES ('c1', ?, ?, 600, 0)", (t0, t0 + 1200))
     db.execute("INSERT INTO conversations VALUES ('c2', ?, ?, 60, 0)", (t0 + 7200, t0 + 7300))  # no readings
     db.commit()

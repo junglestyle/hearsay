@@ -390,3 +390,18 @@ downstream.
 Done when: the measures and detectors that hold up against the operator's
 ears are in the stream, at least one of them. If none does, the slice stops
 there.
+
+Measured 2026-10-09 to 10-12 on the owner's ~1,100 turns. Ending pitch,
+rate, pauses and trailing off are mostly independent of arousal (rate
+r 0.41, the rest about 0), but none matched the owner's blind
+assertive/neutral/tentative ratings of 29 calm turns (Spearman -0.23 to
++0.06, all within chance), so there is no assertiveness label; that would
+need ratings by someone else to settle. Stutters held up: of 24 detections
+the owner judged by ear, 20 were real (repeats 11/13, restarts 5/6, fillers
+4/5); doubled answer words ("yeah, yeah") are left out. Per word, above
+about 3.3 words/s the owner repeats and restarts 30-50% more than below it
+and uses fewer fillers; the speed-up in the 3 s right before a stutter is
+barely above chance against random words (53%), so it is pace across a
+turn, not a sudden rush. In the stream: `delivery` on owner utterances, with
+rate, pauses and stutters, each stutter with the rate before it; ending pitch
+left out (the tracker is noisy at word ends).
