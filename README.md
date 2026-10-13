@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hearsay-mark-dark.svg">
+    <img src="docs/assets/hearsay-mark-light.svg" alt="Hearsay" width="120">
+  </picture>
+</p>
+
 # hearsay
 
 [![tests](https://github.com/junglestyle/hearsay/actions/workflows/test.yml/badge.svg)](https://github.com/junglestyle/hearsay/actions/workflows/test.yml)

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Hearsay">
+<g fill="none" stroke-linecap="round">
+<circle cx="60" cy="60" r="44" stroke="#1A1918" stroke-width="4" stroke-dasharray="60 14 22 10 90 20" transform="rotate(-30 60 60)"/>
+<circle cx="60" cy="60" r="35" stroke="#1A1918" stroke-width="4" stroke-dasharray="40 18 70 12 30 50" transform="rotate(40 60 60)"/>
+<circle cx="60" cy="60" r="26" stroke="#1A1918" stroke-width="4" stroke-dasharray="50 12 30 20 50" transform="rotate(110 60 60)"/>
+<circle cx="60" cy="60" r="17" stroke="#FF5A1F" stroke-width="4" stroke-dasharray="70 37"/>
+<circle cx="60" cy="60" r="5" fill="#FF5A1F" stroke="none"/>
+</g>
+</svg>
