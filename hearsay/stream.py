@@ -90,10 +90,10 @@ def letters(n: int) -> str:
 def utterances(db: sqlite3.Connection) -> dict[str, list[dict]]:
     by_conversation = {}
     stutters = {}
-    for turn_id, at, kind, before in db.execute(
-        "SELECT turn_id, at, kind, words_per_second_before FROM turn_stutters ORDER BY turn_id, at"
+    for turn_id, at, kind, before, word in db.execute(
+        "SELECT turn_id, at, kind, words_per_second_before, word FROM turn_stutters ORDER BY turn_id, at"
     ):
-        stutters.setdefault(turn_id, []).append((at, kind, before))
+        stutters.setdefault(turn_id, []).append((at, kind, before, word))
     labels = {}  # (conversation, kind, voice) -> "anon A" / "stranger A"
     for (conversation_id, idx, start, end, text, diar_speaker, confidence,
          label, basis, similarity, person, cluster, zero_at, arousal,
@@ -131,8 +131,8 @@ def utterances(db: sqlite3.Connection) -> dict[str, list[dict]]:
         if words_per_second is not None and kind == "owner":
             utterance["delivery"] = {
                 "words_per_second": words_per_second, "pauses": pauses, "pause_seconds": pause_seconds,
-                "stutters": [{"kind": k, "at": iso(zero + at), "words_per_second_before": before}
-                             for at, k, before in stutters.get(turn_id, [])],
+                "stutters": [{"kind": k, "at": iso(zero + at), "words_per_second_before": before, "word": word}
+                             for at, k, before, word in stutters.get(turn_id, [])],
             }
         by_conversation.setdefault(conversation_id, []).append(utterance)
     return by_conversation

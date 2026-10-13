@@ -1,4 +1,4 @@
-from hearsay.delivery import speaking_rate, stutters
+from hearsay.delivery import positions, speaking_rate, stutters
 
 
 def words(spec):
@@ -8,9 +8,18 @@ def words(spec):
 
 def test_stutters_are_found_by_timing_and_deliberate_doubles_are_not():
     turn = words("So@0.0 I@0.25 I@0.5 went@0.75 uh@1.0 wh@1.25 what@1.5 yeah,@1.75 yeah@2.0 the@3.0 the@4.0")
-    found = [(at, kind) for at, kind, _ in stutters(turn)]
+    found = [(at, kind) for at, kind, _, _ in stutters(turn)]
     # "the ... the" a second apart is two separate words, not a stutter.
     assert found == [(0.25, "repeat"), (1.0, "filler"), (1.25, "restart")]
+
+
+def test_each_stutter_is_placed_in_the_text_so_it_can_be_dropped():
+    # "5" got no timestamp, so it is in the text but not among the timed words.
+    turn = words("I@0.0 I@0.25 had@0.5 uh@0.75 wh@1.0 what@1.25 friends@1.75")
+    text = "I I had 5 uh wh what friends"
+    where = positions(turn, text)
+    dropped = {where[i] for _, _, _, i in stutters(turn)}
+    assert " ".join(w for n, w in enumerate(text.split()) if n not in dropped) == "I had 5 what friends"
 
 
 def test_speaking_rate_leaves_pauses_out():

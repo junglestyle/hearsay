@@ -7,7 +7,9 @@ turns only, labeled by voice or channel, at least MIN_TURN long, like affect.
 Stutters are the same word twice in a row, a fragment the next word starts
 with ("wh what"), and fillers ("uh", "um"). Each carries the speaking rate in
 the STUTTER_LEAD seconds before it, since the owner's stutters come from
-speaking quickly. Checked blind 2026-10-12: of 24 detections the owner judged
+speaking quickly, and the position in the turn's text (split on whitespace)
+of the word that is the stutter: a repeat's first copy, a restart's
+fragment, the filler. Dropping those words gives the turn without them. Checked blind 2026-10-12: of 24 detections the owner judged
 by ear, 20 were real stutters (repeats 11/13, restarts 5/6, fillers 4/5); one
 miss was "yeah, yeah, yeah", so repeats of short answer words are left out.
 On 1,102 owner turns, above about 3.3 words/s the owner repeated and
@@ -49,7 +51,8 @@ CREATE TABLE turn_stutters (
     turn_id TEXT NOT NULL REFERENCES turns(turn_id),
     at REAL NOT NULL,                -- seconds into the conversation WAV
     kind TEXT NOT NULL,              -- repeat | restart | filler
-    words_per_second_before REAL     -- over the STUTTER_LEAD s before, NULL if too few words
+    words_per_second_before REAL,    -- over the STUTTER_LEAD s before, NULL if too few words
+    word INTEGER                     -- its position in the turn's text split on whitespace; NULL if not found
 );
 """
 
@@ -66,8 +69,8 @@ def speaking_rate(words: list[tuple[float, float, str]]) -> float | None:
     return len(words) / max(words[-1][1] - words[0][0] - pauses, 0.1)
 
 
-def stutters(words: list[tuple[float, float, str]]) -> list[tuple[float, str, float | None]]:
-    """(at, kind, words per second before) for each stutter in a turn's words, in order."""
+def stutters(words: list[tuple[float, float, str]]) -> list[tuple[float, str, float | None, int]]:
+    """(at, kind, words per second before, index in words) for each stutter in a turn's words, in order."""
     found = []
     for i, (start, end, word) in enumerate(words):
         this = norm(word)
@@ -82,7 +85,24 @@ def stutters(words: list[tuple[float, float, str]]) -> list[tuple[float, str, fl
         else:
             continue
         before = [w for w in words if start - STUTTER_LEAD <= w[0] < start]
-        found.append((start, kind, speaking_rate(before)))
+        found.append((start, kind, speaking_rate(before), i))
+    return found
+
+
+def positions(words: list[tuple[float, float, str]], text: str) -> list[int | None]:
+    """Where each timed word starts in the text split on whitespace. The text
+    also holds the words that got no timestamp (numbers, often: hearsay/turns.py),
+    so the timed words are found in it in order; None from the first that isn't."""
+    tokens = text.split()
+    found, j = [], 0
+    for _, _, word in words:
+        pieces = word.split()
+        while j < len(tokens) and tokens[j:j + len(pieces)] != pieces:
+            j += 1
+        if j >= len(tokens):
+            return found + [None] * (len(words) - len(found))
+        found.append(j)
+        j += len(pieces)
     return found
 
 
@@ -90,7 +110,7 @@ def measure_delivery(db_path: Path, transcripts_dir: Path) -> dict:
     db = sqlite3.connect(db_path)
     try:
         turns = db.execute(
-            "SELECT t.turn_id, t.conversation_id, t.start, t.end, ca.wav_sha256 FROM turns t"
+            "SELECT t.turn_id, t.conversation_id, t.start, t.end, t.text, ca.wav_sha256 FROM turns t"
             " JOIN turn_speakers ts ON ts.turn_id = t.turn_id"
             " JOIN conversation_audio ca ON ca.conversation_id = t.conversation_id"
             " WHERE ts.label = 'owner' AND ts.basis IN ('voice', 'channel') AND t.end - t.start >= ?"
@@ -99,7 +119,7 @@ def measure_delivery(db_path: Path, transcripts_dir: Path) -> dict:
         ).fetchall()
         delivery, stutter_rows = [], []
         words, loaded = [], None
-        for turn_id, conversation_id, start, end, wav_sha256 in turns:
+        for turn_id, conversation_id, start, end, text, wav_sha256 in turns:
             if conversation_id != loaded:
                 # The transcript the turns were built from (hearsay/turns.py). If the
                 # dev box replaced it since, this conversation waits a run.
@@ -114,10 +134,12 @@ def measure_delivery(db_path: Path, transcripts_dir: Path) -> dict:
                 continue
             pauses = [b[0] - a[1] for a, b in zip(mine, mine[1:]) if b[0] - a[1] > PAUSE]
             delivery.append((turn_id, round(rate, 2), len(pauses), round(sum(pauses) / len(pauses), 2) if pauses else None))
-            stutter_rows += [(turn_id, at, kind, round(before, 2) if before else None) for at, kind, before in stutters(mine)]
+            where = positions(mine, text)
+            stutter_rows += [(turn_id, at, kind, round(before, 2) if before else None, where[i])
+                             for at, kind, before, i in stutters(mine)]
         db.executescript(SCHEMA)
         db.executemany("INSERT INTO turn_delivery VALUES (?,?,?,?)", delivery)
-        db.executemany("INSERT INTO turn_stutters VALUES (?,?,?,?)", stutter_rows)
+        db.executemany("INSERT INTO turn_stutters VALUES (?,?,?,?,?)", stutter_rows)
         db.commit()
     finally:
         db.close()

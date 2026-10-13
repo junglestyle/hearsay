@@ -26,8 +26,11 @@ utterances may also carry `affect` {arousal}: how calm or animated the owner
 sounded, about 0-1, from the audio alone (`hearsay/affect.py`); absent where
 the turn wasn't scored. Other people's tone is never inferred. They may also
 carry `delivery` {words_per_second, pauses, pause_seconds, stutters: [{kind
-(repeat, restart, filler), at, words_per_second_before}]}: measured from the
+(repeat, restart, filler), at, words_per_second_before, word}]}: measured from the
 word timings (`hearsay/delivery.py`), not judged; absent where not measured.
+`word` is the stutter's position in `text` split on whitespace (a repeat's
+first copy, a restart's fragment, the filler), so dropping those words gives
+the text without them; null where it couldn't be placed.
 
 Each index entry also lists `taps`: when the owner marked that conversation
 with the pendant's button (a start mark, e.g. a self-note, kept even when
