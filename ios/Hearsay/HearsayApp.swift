@@ -38,7 +38,7 @@ final class Recorder {
         // Uploads cover a minute each; the NAS reprocesses hourly, so there's
         // no point in smaller ones. Timers only fire while the app runs,
         // which in the background is while the pendant is sending.
-        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [spool, pause, pendant, location] _ in
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [spool, pause, location] _ in
             spool.sync()
             pause.window?.sync()
             location.tick()

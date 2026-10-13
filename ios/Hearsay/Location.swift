@@ -65,8 +65,12 @@ final class Location: NSObject, ObservableObject, CLLocationManagerDelegate {
             let monitor = await CLMonitor("hearsay")
             self.monitor = monitor
             await monitor.remove(Self.anchorID)  // left from before a relaunch: Movement starts fresh
-            for try await event in await monitor.events where event.state == .unsatisfied {
-                self.apply(self.movement.leftAnchor(at: Date().timeIntervalSince1970))
+            do {
+                for try await event in await monitor.events where event.state == .unsatisfied {
+                    self.apply(self.movement.leftAnchor(at: Date().timeIntervalSince1970))
+                }
+            } catch {
+                log.error("the geofence monitor stopped: \(error)")
             }
         }
         routeChanged()

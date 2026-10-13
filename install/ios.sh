@@ -185,7 +185,7 @@ say "Your car (optional)"
 # Manual: only the operator's phone, in the operator's car, can see its Bluetooth.
 cat <<MSG
 Connecting to and leaving the car help tell when a trip starts and ends. In
-the car, with the phone on its Bluetooth, open Hearsay: under Location, tap
+the car, with the phone on its Bluetooth, open Hearsay: in Settings (the gear), under Location, tap
 "Use ... as my car". Skip this if you have no car Bluetooth.
 MSG
 confirm "Done, or skipped?"
