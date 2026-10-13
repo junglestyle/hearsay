@@ -8,9 +8,12 @@ On the NAS this runs hourly (install/nas.sh), offset from the dev box's timer.
 The database is built as a staging copy and swapped in only when every step
 has finished, so the portal and the label tool always read a complete one,
 and a failed run leaves the previous database in place. Slow steps (voice
-detection, speaker embeddings) are cached by audio content next to it.
+detection, speaker embeddings) are cached by audio content next to it. Runs
+share the staging copy, so a run waits for any other to finish (the hourly
+one and one started by hand used to overlap and break each other).
 """
 
+import fcntl
 import os
 import sqlite3
 import sys
@@ -41,6 +44,8 @@ def report(title: str, counts: dict) -> None:
 
 def run(raw_dir: Path, db_path: Path, audio_dir: Path, labels_dir: Path, model_dir: Path,
         transcripts_dir: Path, imports_dir: Path, stream_dir: Path, affect_model_dir: Path) -> None:
+    lock = open(db_path.with_name("reprocess.lock"), "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
     staging = db_path.with_name(db_path.name + ".building")
     cache = Cache(db_path.parent / "cache.sqlite")
     try:
