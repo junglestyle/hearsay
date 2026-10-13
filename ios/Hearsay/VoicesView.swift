@@ -23,14 +23,16 @@ struct VoicesView: View {
                         .id(reload)
                         .ignoresSafeArea(edges: .bottom)
                 } else {
-                    ContentUnavailableView("No portal address", systemImage: "person.wave.2",
-                                           description: Text("Enter it under Recorder > Server. install/ios.sh prints it."))
+                    ContentUnavailableView("No Portal Address", systemImage: "person.wave.2",
+                                           description: Text("Enter it in the Recorder tab's Settings, under Server. install/ios.sh prints it."))
                 }
             }
             .navigationTitle("Voices")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                Button { reload += 1 } label: { Image(systemName: "arrow.clockwise") }
+                if Settings.portalURL != nil {
+                    Button { reload += 1 } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                }
             }
         }
     }
@@ -128,9 +130,16 @@ private struct PortalView: UIViewRepresentable {
             let error = error as NSError
             if error.code == NSURLErrorCancelled { return }
             if error.domain == "WebKitErrorDomain" && error.code == 102 { return }
-            let message = "Can't reach the portal at \(home.absoluteString): \(error.localizedDescription). Is Tailscale on?"
-            webView.loadHTMLString("<meta name=viewport content='width=device-width'><p style='font:17px system-ui;padding:1rem'>"
-                                   + message.replacingOccurrences(of: "<", with: "&lt;") + "</p>", baseURL: nil)
+            let reason = error.localizedDescription.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            let message = "\(home.absoluteString): \(reason). Is Tailscale on?"
+            // Styled like the app's own empty states, in light and dark.
+            webView.loadHTMLString("""
+                <meta name=viewport content='width=device-width'><meta name=color-scheme content='light dark'>
+                <style>body{font:-apple-system-body;margin:0;height:90vh;display:flex;align-items:center;
+                justify-content:center;text-align:center;padding:0 2rem;color:#8a8a8e}
+                h1{font:-apple-system-title3;font-weight:700;color:CanvasText;margin:0 0 .4rem}</style>
+                <div><h1>Can't Reach the Portal</h1><p>
+                """ + message.replacingOccurrences(of: "<", with: "&lt;") + "</p></div>", baseURL: nil)
         }
     }
 }

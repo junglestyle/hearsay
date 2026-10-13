@@ -65,8 +65,23 @@ struct HearsayApp: App {
                 VoicesView()
                     .tabItem { Label("Voices", systemImage: "person.wave.2") }
             }
+            .tint(.ink)
         }
     }
+}
+
+/// The orange at the core of the app icon. It means one thing: the pendant's
+/// audio is reaching Hearsay right now.
+extension Color {
+    static let live = Color(red: 1, green: 0x5A / 255, blue: 0x1F / 255)
+
+    /// The icon's rings: the tint for everything interactive, so the orange
+    /// stays the only color on screen.
+    static let ink = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0xE8 / 255, green: 0xE4 / 255, blue: 0xDA / 255, alpha: 1)
+            : UIColor(red: 0x1A / 255, green: 0x19 / 255, blue: 0x18 / 255, alpha: 1)
+    })
 }
 
 struct StatusView: View {
@@ -75,37 +90,12 @@ struct StatusView: View {
     @ObservedObject var buttons: Buttons
     @ObservedObject var uploader: Uploader
     @ObservedObject var location: Location
-    @State private var url = Settings.urlText
-    @State private var token = ""
-    @State private var portal = Settings.portalText
-    @State private var confirmForget = false
-    @State private var led = 50.0
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
-                    HStack {
-                        Circle().fill(pendant.state == "connected" ? Color.green : Color.secondary)
-                            .frame(width: 8, height: 8)
-                        Text(pendant.state)
-                        Spacer()
-                        if let battery = pendant.battery {
-                            Label("\(battery)%", systemImage: batterySymbol(battery))
-                                .labelStyle(.titleAndIcon)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        if !pendant.lastMinute.isEmpty { Text("Last minute: \(pendant.lastMinute)") }
-                        if !pendant.stored.isEmpty { Text("Stored while away: \(pendant.stored)") }
-                        Text("Uploads: \(uploader.pending) waiting, \(uploader.lastResult)")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-
-                Section {
+                    header
                     HStack(spacing: 12) {
                         control(pause.paused ? "Resume" : "Pause",
                                 symbol: pause.paused ? "play.fill" : "pause.fill", on: pause.paused) {
@@ -116,11 +106,21 @@ struct StatusView: View {
                             pendant.setMuted(!pendant.muted)
                         }
                     }
-                    .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
-                    Toggle("Keep paused audio on this phone", isOn: Binding(get: { pause.keep },
-                                                                            set: { pause.setKeep($0) }))
+                    .listRowSeparator(.hidden)
                 } footer: {
                     Text(recordingStatus)
+                }
+
+                Section("Activity") {
+                    if !pendant.lastMinute.isEmpty { detail("Last minute", pendant.lastMinute) }
+                    if !pendant.stored.isEmpty { detail("Stored while away", pendant.stored) }
+                    HStack {
+                        detail("Uploads", "\(uploader.pending) waiting · \(uploader.lastResult)")
+                        Spacer()
+                        Button("Send Now") { uploader.drain() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
                 }
 
                 if !pause.windows.isEmpty {
@@ -129,10 +129,7 @@ struct StatusView: View {
                             NavigationLink {
                                 WindowView(window: window, pause: pause, uploader: uploader)
                             } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(timeRange(window))
-                                    Text(details(window)).font(.caption).foregroundStyle(.secondary)
-                                }
+                                detail(timeRange(window), details(window))
                             }
                             .swipeActions {
                                 Button("Delete", role: .destructive) { pause.delete(window) }
@@ -149,92 +146,88 @@ struct StatusView: View {
                         Text("Tap to listen and keep a stretch. Swipe to upload or delete all of it.")
                     }
                 }
-
-                Section {
-                    LabeledContent("Now", value: location.state.label)
-                    LabeledContent("Car", value: Settings.carName.isEmpty ? "Not set" : Settings.carName)
-                    if let output = location.output, output != Settings.carName {
-                        Button("Use \u{201C}\(output)\u{201D} as my car") { location.useAsCar() }
-                    }
-                } header: {
-                    Text("Location")
-                } footer: {
-                    Text("While connected to your car's Bluetooth, tap to use it as your car. Connecting and disconnecting help tell when a trip starts and ends.")
-                }
-
-                Section("Pendant") {
-                    if pendant.led != nil {
-                        HStack {
-                            Image(systemName: "lightbulb").foregroundStyle(.secondary)
-                            Slider(value: $led, in: 0...100, step: 5) { editing in
-                                if !editing { pendant.setLED(Int(led)) }
-                            }
-                        }
-                        .onAppear { led = Double(pendant.led ?? 50) }
-                        .onChange(of: pendant.led) { _, level in if let level { led = Double(level) } }
-                    }
-                    Picker("Single tap", selection: $buttons.single) {
-                        ForEach(Buttons.Action.allCases) { Text($0.label).tag($0) }
-                    }
-                    Picker("Double tap", selection: $buttons.double) {
-                        ForEach(Buttons.Action.allCases) { Text($0.label).tag($0) }
-                    }
-                    DisclosureGroup("Buzzes") {
-                        Text("Keep: one short. End: one medium. Pause: one long; resume: two short. Mute: two long; unmute: three short. Holding the button 3 s turns the pendant off.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Button("Use a different pendant", role: .destructive) { confirmForget = true }
-                        .confirmationDialog("Forget this pendant and connect to the next one found?",
-                                            isPresented: $confirmForget, titleVisibility: .visible) {
-                            Button("Forget", role: .destructive) { pendant.forget() }
-                        }
-                }
-
-                Section {
-                    Button("Send uploads now") { uploader.drain() }
-                    DisclosureGroup("Server") {
-                        TextField("http://<nas tailnet ip>:8789/capture", text: $url)
-                            .keyboardType(.URL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        SecureField(Settings.token == nil ? "Token" : "Token (saved; enter to replace)", text: $token)
-                        TextField("http://<nas tailnet ip>:8788 (naming portal)", text: $portal)
-                            .keyboardType(.URL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        Button("Save") {
-                            Settings.save(url: url, token: token)
-                            Settings.save(portal: portal)
-                            token = ""
-                            uploader.drain()
-                        }
-                    }
-                } footer: {
-                    Text("install/ios.sh prints the capture URL, token and portal URL. The phone must be on the tailnet.")
-                }
             }
             .navigationTitle("Hearsay")
+            .toolbar {
+                NavigationLink {
+                    SettingsView(pendant: pendant, pause: pause, buttons: buttons,
+                                 uploader: uploader, location: location)
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+            }
         }
     }
 
-    /// A large toggle-like button; filled while its state is on.
-    private func control(_ title: String, symbol: String, on: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol)
-                Text(title)
+    private var connected: Bool { pendant.state == "connected" }
+    private var live: Bool { connected && !pause.paused && !pendant.muted }
+
+    /// What's happening, in one line, then the pendant's own state.
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "circle.fill")
+                .font(.caption)
+                .foregroundStyle(live ? Color.live : Color.secondary.opacity(0.5))
+                .symbolEffect(.pulse, isActive: live)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(headline)
+                    .font(.title2.weight(.semibold))
+                    .contentTransition(.opacity)
+                Text(connected ? "Pendant connected" : pendant.state.prefix(1).uppercased() + pendant.state.dropFirst())
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, minHeight: 36)
+            Spacer()
+            if let battery = pendant.battery {
+                Label("\(battery)%", systemImage: batterySymbol(battery))
+                    .font(.subheadline)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
         }
-        .buttonStyle(.borderedProminent)
-        .tint(on ? .orange : .accentColor)
+        .padding(.vertical, 4)
+        .animation(.snappy, value: headline)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var headline: String {
+        if pause.paused { return "Paused" }
+        if pendant.muted { return "Muted" }
+        return connected ? "Recording" : "Not connected"
+    }
+
+    /// Filled while its state is on, so the button shows the state too.
+    @ViewBuilder
+    private func control(_ title: String, symbol: String, on: Bool, action: @escaping () -> Void) -> some View {
+        let button = Button(action: action) {
+            Label(title, systemImage: symbol)
+                .fontWeight(.medium)
+                .frame(maxWidth: .infinity)
+        }
+        .controlSize(.large)
+        .tint(.ink)
+        if on {
+            button.buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground))
+        } else {
+            button.buttonStyle(.bordered).foregroundStyle(.primary)
+        }
+    }
+
+    private func detail(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
     }
 
     private var recordingStatus: String {
         let mic = pendant.muted ? "Mic muted on the pendant, even out of range." : ""
-        guard pause.paused else { return pendant.muted ? mic : "Recording. Paused audio never reaches Hearsay." }
-        let paused = pause.keep ? "Paused: kept on this phone for 30 days." : "Paused: dropped as it arrives."
+        guard pause.paused else { return pendant.muted ? mic : "Paused audio never reaches Hearsay." }
+        let paused = pause.keep ? "Paused audio is kept on this phone for 30 days." : "Paused audio is dropped as it arrives."
         return [paused, mic].filter { !$0.isEmpty }.joined(separator: " ")
     }
 

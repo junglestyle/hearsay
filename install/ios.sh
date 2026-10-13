@@ -148,7 +148,7 @@ echo "Checking the portal answers at $portal"
 wait_for_status GET "$portal/login" 200 10
 cat <<MSG
 The phone needs Tailscale on (the Tailscale app, connected) to reach the NAS.
-In the Hearsay app, under Recorder > Server, enter:
+In the Hearsay app, under Recorder > Settings (the gear) > Server, enter:
   Capture URL:  $url
   Token:        on the NAS: sudo sed -n 's/^HEARSAY_CAPTURE_TOKEN=//p' $NAS_CAPTURE_ENV
   Portal URL:   $portal
