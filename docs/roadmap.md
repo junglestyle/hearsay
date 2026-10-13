@@ -317,6 +317,14 @@ label or the operator's names.
 Done when: naming a cluster in the portal offers the people heard at that
 place first, and that measurably saves the operator time.
 
+Measured, with slice 15's hint, by `python3 -m hearsay.hints` on the NAS:
+from tags.jsonl alone, each hint's namings taken, typed, typed though
+offered and not offered (name tags record what was "offered" since
+2026-10-13), how many taken were undone (a later tag renaming the same
+turns), and the median seconds per naming. First reading, 2026-10-13: of 9
+people named since the hint, 5 were taken from it (1 later retagged
+`_media`), and neither of 2 `_media` namings came from the media hint.
+
 ## 15. Media hint
 
 TV and video dialogue is a large share of other voices (on 2026-10-07, 85 of

@@ -260,6 +260,13 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             db.close()
         return places, people
 
+    def hints(turns: list[dict], person: str | None) -> tuple[list[str], list[str], bool]:
+        """What a cluster's page offers for one tap: its places and the people
+        heard there, and whether it sounds like tagged media (unnamed only)."""
+        places, people = heard_at_places({s["conversation_id"] for s in turns})
+        score = media_score([s["turn_id"] for s in turns]) if not person else None
+        return places, people, score is not None and score >= MEDIA_HINT
+
     def media_score(turn_ids: list[str]) -> float | None:
         """How much a cluster sounds like the media the operator has tagged (hearsay/media.py)."""
         db = connect()
@@ -428,14 +435,13 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         if odd:
             odd = ("<h2>Tagged differently</h2><p class='muted'>Earlier tags here say someone else."
                    " Tag each clip for what it is.</p>" + odd)
-        places, suggested = heard_at_places({s["conversation_id"] for s in turns})
+        places, suggested, media = hints(turns, person)
         hint = ""
         if suggested:
             hint = (f"<p class='muted'>Heard at {html.escape(', '.join(places))}:</p>" + "".join(
                 f"<button type='submit' name='suggested' value='{html.escape(p)}' formnovalidate>{html.escape(p)}</button>"
                 for p in suggested))
-        score = media_score([s["turn_id"] for s in turns]) if not person else None
-        if score is not None and score >= MEDIA_HINT:
+        if media:
             hint += ("<p class='muted'>Sounds like the TV or video you've tagged before:</p>"
                      "<button type='submit' name='suggested' value='_media' formnovalidate>Looks like media: _media</button>")
         categories = {"_noise", "_media", "_stranger"}
@@ -526,7 +532,11 @@ A clip that isn't this speaker (a cough, a video, someone else) can be tagged on
                 # A category takes only tagged turns (hearsay/people.py), so
                 # it is put on the whole cluster as it is now.
                 chosen = turns
-            append_tag({"type": "name", **spans(chosen), "name": name if action == "name" else None}
+            # What the page offered, so hearsay/hints.py can tell a hint
+            # passed over from one never offered.
+            _, people, media = hints(turns, name_of(turns, names)[0])
+            append_tag({"type": "name", **spans(chosen), "name": name if action == "name" else None,
+                        "offered": people + (["_media"] if media else [])}
                        | ({"via": "media" if suggested == "_media" else "place"} if suggested else {}))
         else:
             return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)

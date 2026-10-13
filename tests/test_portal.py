@@ -271,7 +271,7 @@ def test_people_heard_at_a_cluster_s_place_are_offered_for_one_tap(portal):
     assert "Heard at Blind Monk" in page and "name='suggested' value='Sam'" in page
     client.post(f"/cluster/{cluster_a}", data={"suggested": "Sam"})
     record = json.loads((labels_dir / "tags.jsonl").read_text().splitlines()[-1])
-    assert (record["name"], record["via"]) == ("Sam", "place")  # counted, to see if the hint saves time
+    assert (record["name"], record["via"], record["offered"]) == ("Sam", "place", ["Sam"])  # counted (hearsay/hints.py)
 
 
 def test_a_cluster_that_sounds_like_tagged_media_offers_media_for_one_tap(portal):
