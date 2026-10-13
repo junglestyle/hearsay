@@ -6,14 +6,16 @@ records, hearsay/capture.py): a precise fix when recording starts and about
 every 5 minutes on the move; staying put, it stops taking fixes and says every
 5 minutes that it's still at its anchor (MOVEMENT records), which count as
 readings too. Only named places reach the stream, never
-coordinates: a reading is at the nearest named place within RADIUS, and a
-reading near no named place says nothing. Names are the operator's durable
+coordinates: a reading is at the nearest named spot within its radius
+(RADIUS unless the operator set one), and a reading near no named place
+says nothing. Names are the operator's durable
 input in labels/places.jsonl, matched by distance on every reprocess, so
 naming a place applies to every past conversation there.
 
 labels/places.jsonl, one record per line:
-    {"type": "place", "name", "latitude", "longitude"}  a named spot; naming a
-        second spot with the same name makes both that place (a big venue)
+    {"type": "place", "name", "latitude", "longitude", "radius"?}  a named
+        spot, radius in metres (RADIUS if absent); naming a second spot with
+        the same name makes both that place (a big venue)
     {"type": "rename", "from", "to"}  renaming onto an existing name merges them
     {"type": "forget", "name"}  every spot with that name
     {"type": "ignore", "latitude", "longitude"}  not a place: readings near it
@@ -28,9 +30,11 @@ import math
 import sqlite3
 from pathlib import Path
 
-# Metres from a named place within which a reading is at it: the readings'
-# own accuracy.
+# Metres from a named place within which a reading is at it, unless the
+# operator set its own: the readings' own accuracy.
 RADIUS = 100.0
+# The radii the operator can set: about a shop to a festival ground.
+MIN_RADIUS, MAX_RADIUS = 25.0, 2000.0
 # The last reading this long before a conversation starts still says where it
 # began: the phone reads about every 5 minutes, a fix can take most of a
 # minute, and iOS doesn't keep exact time in the background.
@@ -55,16 +59,16 @@ def metres(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * 6371000 * math.asin(math.sqrt(a))
 
 
-def read_places(labels_dir: Path) -> list[tuple[str, float, float]]:
-    """(name, latitude, longitude) for each named spot, with renames and forgets applied in order."""
+def read_places(labels_dir: Path) -> list[tuple[str, float, float, float]]:
+    """(name, latitude, longitude, radius) for each named spot, with renames and forgets applied in order."""
     path = labels_dir / "places.jsonl"
     spots = []
     for line in (path.read_text().splitlines() if path.exists() else []):
         record = json.loads(line)
         if record["type"] == "place":
-            spots.append((record["name"], record["latitude"], record["longitude"]))
+            spots.append((record["name"], record["latitude"], record["longitude"], record.get("radius", RADIUS)))
         elif record["type"] == "rename":
-            spots = [(record["to"] if name == record["from"] else name, lat, lon) for name, lat, lon in spots]
+            spots = [(record["to"] if s[0] == record["from"] else s[0], *s[1:]) for s in spots]
         elif record["type"] == "forget":
             spots = [s for s in spots if s[0] != record["name"]]
     return spots
@@ -83,9 +87,9 @@ def read_ignored(labels_dir: Path) -> list[tuple[float, float]]:
     return ignored
 
 
-def nearest(latitude: float, longitude: float, spots: list[tuple[str, float, float]]) -> str | None:
-    found = [(metres(latitude, longitude, lat, lon), name) for name, lat, lon in spots]
-    found = [f for f in found if f[0] <= RADIUS]
+def nearest(latitude: float, longitude: float, spots: list[tuple[str, float, float, float]]) -> str | None:
+    found = [(metres(latitude, longitude, lat, lon), radius, name) for name, lat, lon, radius in spots]
+    found = [(distance, name) for distance, radius, name in found if distance <= radius]
     return min(found)[1] if found else None
 
 
@@ -134,7 +138,7 @@ def find_places(db_path: Path, labels_dir: Path) -> dict:
 MIN_SPOT_READINGS = 3
 
 
-def unnamed_spots(readings: list[tuple[float, float, float]], spots: list[tuple[str, float, float]],
+def unnamed_spots(readings: list[tuple[float, float, float]], spots: list[tuple[str, float, float, float]],
                   ignored: list[tuple[float, float]] = ()) -> list[dict]:
     """Where the owner spent time that no named or ignored place is near, most time first.
 

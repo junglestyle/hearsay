@@ -37,7 +37,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from hearsay.media import HINT as MEDIA_HINT
 from hearsay.people import cluster_name
-from hearsay.places import LOOKBACK, read_ignored, read_places, unnamed_spots
+from hearsay.places import LOOKBACK, MAX_RADIUS, MIN_RADIUS, RADIUS, read_ignored, read_places, unnamed_spots
 from hearsay.turns import read_operator_files, resolve, wall
 
 COOKIE = "hearsay_session"
@@ -632,10 +632,11 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
             return f"<a href='https://maps.apple.com/?ll={lat:.5f},{lon:.5f}&q={quote(label)}'>Open in Maps</a>"
 
         named = ""
-        for name in sorted({n for n, _, _ in spots}):
-            _, lat, lon = next(sp for sp in spots if sp[0] == name)
+        for name in sorted({sp[0] for sp in spots}):
+            _, lat, lon, radius = next(sp for sp in spots if sp[0] == name)
             named += (f"<li><strong>{html.escape(name)}</strong> <span class='muted'>"
-                      f"{visited.get(name, 0)} conversation(s) as of the last reprocess · {maps(lat, lon, name)}</span>"
+                      f"{visited.get(name, 0)} conversation(s) as of the last reprocess"
+                      f"{f' · within {radius:.0f} m' if radius != RADIUS else ''} · {maps(lat, lon, name)}</span>"
                       f"<form class='clip' method='post' action='/places'><input type='hidden' name='from' value='{html.escape(name)}'>"
                       "<input name='name' placeholder='New name (an existing one merges them)' autocomplete='off'>"
                       "<button type='submit' name='action' value='rename'>Rename</button>"
@@ -672,7 +673,8 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
 <p><a href="/">← Speakers</a></p>
 <h1>Places</h1>
 <p class="muted">Where conversations happened, from the phone's location while it records. Only names you give
-reach the stream, never coordinates; a reading counts as a place within 100 m of it. To put a place
+reach the stream, never coordinates; a reading counts as a place within 100 m of it, or the area set
+in the app's Places map. To put a place
 exactly where it is, find it in Maps, drop a pin, copy its coordinates, and paste them under Move here.</p>
 <h2>To name</h2><ul>{unnamed or "<li class='muted'>Nowhere new.</li>"}</ul>
 <h2>Named</h2><ul>{named or "<li class='muted'>None yet.</li>"}</ul>
@@ -691,7 +693,8 @@ exactly where it is, find it in Maps, drop a pin, copy its coordinates, and past
             db.close()
         unnamed = unnamed_spots(readings, spots, read_ignored(labels_dir))
         return JSONResponse({
-            "named": [{"name": name, "latitude": lat, "longitude": lon} for name, lat, lon in spots],
+            "named": [{"name": name, "latitude": lat, "longitude": lon, "radius": radius}
+                      for name, lat, lon, radius in spots],
             "unnamed": [{"latitude": s["latitude"], "longitude": s["longitude"], "minutes": len(s["times"])}
                         for s in unnamed]})
 
@@ -706,9 +709,20 @@ exactly where it is, find it in Maps, drop a pin, copy its coordinates, and past
 
         action, name = field("action"), field("name")
         places_path = labels_dir / "places.jsonl"
+        def radius(text: str, default: float = RADIUS) -> float:
+            try:
+                return min(max(float(text), MIN_RADIUS), MAX_RADIUS)
+            except ValueError:
+                return default
+
+        def place(name: str, lat: float, lon: float, r: float) -> dict:
+            # Only a radius the operator set is written, so the default can still change.
+            return {"type": "place", "name": name, "latitude": lat, "longitude": lon,
+                    **({"radius": r} if r != RADIUS else {})}
+
         if action == "name" and name:
-            append_tag({"type": "place", "name": name, "latitude": float(field("latitude")),
-                        "longitude": float(field("longitude"))}, places_path)
+            append_tag(place(name, float(field("latitude")), float(field("longitude")), radius(field("radius"))),
+                       places_path)
         elif action == "rename" and name and field("from") and name != field("from"):
             append_tag({"type": "rename", "from": field("from"), "to": name}, places_path)
         elif action in ("ignore", "unignore"):
@@ -719,12 +733,16 @@ exactly where it is, find it in Maps, drop a pin, copy its coordinates, and past
             append_tag({"type": "forget", "name": field("from")}, places_path)
         elif action == "move" and field("from"):
             # Its spots, where the phone's readings put them, give way to the points given:
-            # one pasted here, or from the app's map each of the place's spots, one dragged.
+            # one pasted here, or from the app's map each of the place's spots, one dragged
+            # or resized. Each at may have a radius, in order; one without keeps the place's.
             points = [coordinates(at) for at in form.get("at", [])]
+            current = max((sp[3] for sp in read_places(labels_dir) if sp[0] == field("from")), default=RADIUS)
+            radii = form.get("radius", [])
             if points and None not in points:
                 append_tag({"type": "forget", "name": field("from")}, places_path)
-                for lat, lon in points:
-                    append_tag({"type": "place", "name": field("from"), "latitude": lat, "longitude": lon}, places_path)
+                for i, (lat, lon) in enumerate(points):
+                    r = radius(radii[i], current) if i < len(radii) else current
+                    append_tag(place(field("from"), lat, lon, r), places_path)
         return RedirectResponse("/places", status_code=303)
 
     @app.get("/audio/{turn_id}")

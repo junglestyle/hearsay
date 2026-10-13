@@ -298,11 +298,14 @@ action=name with name, latitude, longitude; action=ignore with the spot's
 latitude and longitude as listed. The web page's clips stay the way to hear
 a spot. Built 2026-10-13 as the app's Places tab (ios/Hearsay/PlacesView.swift).
 
-Later, low priority: a radius per named spot, for places bigger than 100 m (a
-festival ground). Operator input in labels/places.jsonl like the name,
-used by hearsay/places.py in place of the fixed RADIUS, served in
-/places.json and drawn on the app's map as a circle (MapKit's MapCircle) to
-resize. Until then, several spots under one name cover a big place.
+A radius per named spot, for places bigger or smaller than 100 m (a
+festival ground, a shop next door to another): operator input in
+labels/places.jsonl like the name ("radius", metres, 25 to 2000, absent for
+the default), used by hearsay/places.py in place of the fixed RADIUS. The
+NAS side is built: /places.json gives each named spot's radius, and POST
+/places takes one radius per at on a move (in the same order; one left out
+keeps the place's) and a radius on a name. Next, in the app: draw each named
+spot's area as a circle (MapKit's MapCircle) and let the owner resize it.
 
 ## 14. Place as a hint for who is speaking
 

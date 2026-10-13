@@ -84,3 +84,24 @@ def test_staying_put_keeps_the_place_without_fresh_fixes(tmp_path):
 
     [entry] = json.loads((stream / "index.json").read_text())["conversations"]
     assert [p["name"] for p in entry["places"]] == ["Chill"]
+
+
+def test_a_place_with_a_wider_area_takes_readings_further_out(tmp_path):
+    raw, db_path, labels = tmp_path / "raw", tmp_path / "h.sqlite", tmp_path / "labels"
+    labels.mkdir()
+    t0 = T.timestamp()
+    upload(raw, T + timedelta(minutes=20), "k-wide", fix(t0 + 60, BAR[0] + 0.0027, BAR[1]))  # 300 m off
+    rebuild(raw, db_path)
+    db = sqlite3.connect(db_path)
+    db.executescript(CONVERSATIONS_SCHEMA)
+    db.execute("INSERT INTO conversations VALUES ('c1', ?, ?, 600, 0)", (t0, t0 + 600))
+    db.commit()
+    db.close()
+
+    def places_with(radius):
+        place = {"type": "place", "name": "Fairground", "latitude": BAR[0], "longitude": BAR[1]}
+        (labels / "places.jsonl").write_text(json.dumps({**place, **({"radius": radius} if radius else {})}) + "\n")
+        return find_places(db_path, labels)["conversations_with_a_place"]
+
+    assert places_with(None) == 0
+    assert places_with(400) == 1

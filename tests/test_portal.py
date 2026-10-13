@@ -237,7 +237,7 @@ def test_a_spot_where_the_owner_spent_time_can_be_named(portal):
     # Anchored where it really is, from a pasted Maps link; readings near the old spot are offered again.
     client.post("/places", data={"action": "move", "from": "Chill Room",
                                  "at": "https://maps.apple.com/?ll=26.13000%2C-80.15000&q=Pin"})
-    assert read_places(labels_dir) == [("Chill Room", 26.13, -80.15)]
+    assert read_places(labels_dir) == [("Chill Room", 26.13, -80.15, 100.0)]
     assert "About 5 min" in client.get("/places").text
 
     # The app's map: the token alone, no session; dragging one of a place's two spots keeps both.
@@ -247,8 +247,12 @@ def test_a_spot_where_the_owner_spent_time_can_be_named(portal):
     client.post("/places", headers=app, data={"action": "name", "name": "Chill Room", "latitude": "26.12", "longitude": "-80.14"})
     places = client.get("/places.json", headers=app).json()
     assert len(places["named"]) == 2 and places["unnamed"] == []
-    client.post("/places", headers=app, data={"action": "move", "from": "Chill Room", "at": ["26.13,-80.15", "26.125,-80.145"]})
-    assert read_places(labels_dir) == [("Chill Room", 26.13, -80.15), ("Chill Room", 26.125, -80.145)]
+    client.post("/places", headers=app, data={"action": "move", "from": "Chill Room", "at": ["26.13,-80.15", "26.125,-80.145"],
+                                              "radius": ["100", "400"]})
+    assert read_places(labels_dir) == [("Chill Room", 26.13, -80.15, 100.0), ("Chill Room", 26.125, -80.145, 400.0)]
+    # A move pasted on the web page, with no radius, keeps the area set.
+    client.post("/places", headers=app, data={"action": "move", "from": "Chill Room", "at": "26.12,-80.14"})
+    assert read_places(labels_dir) == [("Chill Room", 26.12, -80.14, 400.0)]
 
 
 def test_people_heard_at_a_cluster_s_place_are_offered_for_one_tap(portal):
