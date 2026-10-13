@@ -15,6 +15,7 @@ hearsay.people.cluster_name).
 """
 
 import asyncio
+import bisect
 import hashlib
 import hmac
 import html
@@ -33,7 +34,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from hearsay.media import HINT as MEDIA_HINT
 from hearsay.people import cluster_name
-from hearsay.places import read_ignored, read_places, unnamed_spots
+from hearsay.places import LOOKBACK, read_ignored, read_places, unnamed_spots
 from hearsay.turns import read_operator_files, resolve, wall
 
 COOKIE = "hearsay_session"
@@ -48,6 +49,8 @@ SUGGESTIONS = 5
 MARGINS = 6
 # Turns tagged differently from their cluster, shown on its page at a time.
 STRAYS = 10
+# Clips played per unnamed place, to tell by ear where it is.
+PLACE_CLIPS = 3
 
 CLUSTERS_SQL = """
 SELECT tp.turn_id, tp.cluster, tp.split, tp.fit, t.conversation_id, t.start, t.end, ca.wav_file, ca.zero_at
@@ -158,6 +161,26 @@ def samples(turns: list[dict]) -> list[dict]:
             conversations.add(s["conversation_id"])
     picked += [s for s in by_length if s not in picked]
     return picked[:SAMPLES]
+
+
+def heard_at_spot(spot_times: list[float], times: list[float], turns: list[tuple]) -> list[tuple]:
+    """The longest turns recorded while the phone was at a spot, one per
+    conversation first. A turn is where the latest reading before it was, as
+    in hearsay/places.py. turns are (turn_id, conversation_id, wall start,
+    duration); times are every reading's, in order."""
+    at_spot = set(spot_times)
+    found = []
+    for turn in turns:
+        i = bisect.bisect_right(times, turn[2]) - 1
+        if i >= 0 and times[i] in at_spot and turn[2] - times[i] <= LOOKBACK:
+            found.append(turn)
+    found.sort(key=lambda t: (-t[3], t[0]))
+    picked, conversations = [], set()
+    for turn in found:
+        if turn[1] not in conversations:
+            picked.append(turn)
+            conversations.add(turn[1])
+    return (picked + [t for t in found if t not in picked])[:PLACE_CLIPS]
 
 
 def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, password: str, session_key: str,
@@ -563,6 +586,10 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
         try:
             readings = db.execute("SELECT at, latitude, longitude FROM locations ORDER BY at").fetchall()
             conversations = db.execute("SELECT conversation_id, start, end FROM conversations").fetchall()
+            turns = [(turn_id, cid, datetime.fromisoformat(zero_at).timestamp() + start, end - start)
+                     for turn_id, cid, zero_at, start, end in db.execute(
+                         "SELECT t.turn_id, t.conversation_id, ca.zero_at, t.start, t.end FROM turns t"
+                         " JOIN conversation_audio ca USING (conversation_id) WHERE ca.wav_file IS NOT NULL")]
             heard = {}
             for conversation_id, person in db.execute(
                 "SELECT DISTINCT t.conversation_id, tp.person FROM turn_people tp JOIN turns t USING (turn_id)"
@@ -585,6 +612,7 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
                       "<input name='name' placeholder='New name (an existing one merges them)' autocomplete='off'>"
                       "<button type='submit' name='action' value='rename'>Rename</button>"
                       "<button type='submit' name='action' value='forget' formnovalidate>Forget</button></form></li>")
+        reading_times = [at for at, _, _ in readings]
         unnamed = ""
         for spot in unnamed_spots(readings, spots, ignored):
             times = spot["times"]
@@ -592,9 +620,13 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
             people = sorted({p for cid, start, end in conversations if any(start <= at <= end for at in times)
                              for p in heard.get(cid, ())})
             lat, lon = spot["latitude"], spot["longitude"]
+            clips = "".join(
+                f"<audio controls preload='none' src='/audio/{quote(turn_id)}'></audio><div class='muted'>"
+                f"{datetime.fromtimestamp(at, timezone.utc):%b %-d %H:%M} UTC · {seconds:.0f} s</div>"
+                for turn_id, _, at, seconds in heard_at_spot(times, reading_times, turns))
             unnamed += (f"<li>About {len(times)} min on {', '.join(days)} (UTC)"
                         f"<div class='muted'>{('Heard: ' + html.escape(', '.join(people))) if people else 'Nobody named heard here.'}"
-                        f" · {maps(lat, lon, 'Unnamed place')}</div>"
+                        f" · {maps(lat, lon, 'Unnamed place')}</div>{clips}"
                         f"<form class='clip' method='post' action='/places'>"
                         f"<input type='hidden' name='latitude' value='{lat:.6f}'><input type='hidden' name='longitude' value='{lon:.6f}'>"
                         "<input name='name' placeholder='Name this place (an existing name adds to it)' autocomplete='off' required>"
