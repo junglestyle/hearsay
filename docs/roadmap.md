@@ -304,8 +304,10 @@ labels/places.jsonl like the name ("radius", metres, 25 to 2000, absent for
 the default), used by hearsay/places.py in place of the fixed RADIUS. The
 NAS side is built: /places.json gives each named spot's radius, and POST
 /places takes one radius per at on a move (in the same order; one left out
-keeps the place's) and a radius on a name. Next, in the app: draw each named
-spot's area as a circle (MapKit's MapCircle) and let the owner resize it.
+keeps the place's) and a radius on a name. In the app (2026-10-13), each
+named spot's area is a faint orange circle (MapKit's MapCircle); selecting
+its pin shows a slider (logarithmic, 25 to 2000 m, in 5 m steps), and Save
+sends the place's move with every spot's at and radius.
 
 ## 14. Place as a hint for who is speaking
 

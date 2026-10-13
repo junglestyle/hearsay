@@ -74,8 +74,8 @@ struct HearsayApp: App {
     }
 }
 
-/// The orange at the core of the app icon. It means one thing: the pendant's
-/// audio is reaching Hearsay right now.
+/// The orange at the core of the app icon: the pendant's audio reaching
+/// Hearsay right now, and, faintly, the area a named place covers on the map.
 extension Color {
     static let live = Color(red: 1, green: 0x5A / 255, blue: 0x1F / 255)
 

@@ -2,14 +2,15 @@ import MapKit
 import SwiftUI
 
 /// The places the operator has named, on Apple's map, so places go to no one
-/// new: drag a named spot's pin to where the place really is, or name a spot
-/// where the owner spent time. The portal (hearsay/portal.py) serves the
+/// new: drag a named spot's pin to where the place really is, select it to
+/// resize the area it covers, or name a spot where the owner spent time. The portal (hearsay/portal.py) serves the
 /// spots and keeps the names; its Places page stays the way to hear a spot.
 struct PlacesView: View {
     struct Named: Identifiable {
         let id: Int
         let name: String
         let coordinate: CLLocationCoordinate2D
+        let radius: Double  // metres
     }
 
     struct Unnamed: Identifiable {
@@ -24,6 +25,8 @@ struct PlacesView: View {
     @State private var named: [Named] = []
     @State private var unnamed: [Unnamed] = []
     @State private var moved: [Named.ID: CLLocationCoordinate2D] = [:]
+    @State private var resized: [Named.ID: Double] = [:]
+    @State private var selected: Named.ID?
     @State private var grab: (id: Named.ID, offset: CGSize)?
     @State private var naming: Unnamed?
     @State private var camera = MapCameraPosition.automatic
@@ -61,8 +64,13 @@ struct PlacesView: View {
 
     private var map: some View {
         MapReader { proxy in
-            Map(position: $camera) {
+            Map(position: $camera, selection: $selected) {
                 UserAnnotation()
+                ForEach(named) { spot in
+                    MapCircle(center: moved[spot.id] ?? spot.coordinate, radius: resized[spot.id] ?? spot.radius)
+                        .foregroundStyle(Color.live.opacity(selected == spot.id ? 0.2 : 0.1))
+                        .stroke(Color.live.opacity(0.6), lineWidth: selected == spot.id ? 2 : 1)
+                }
                 ForEach(unnamed) { spot in
                     Annotation("\(spot.minutes) min", coordinate: spot.coordinate) {
                         Circle()
@@ -80,8 +88,9 @@ struct PlacesView: View {
                         pin(dragging: grab?.id == spot.id, moved: moved[spot.id] != nil)
                             .gesture(drag(spot, proxy))
                             .accessibilityLabel(spot.name)
-                            .accessibilityHint("Drag to where this place really is")
+                            .accessibilityHint("Drag to where this place really is, or select to resize it")
                     }
+                    .tag(spot.id)
                 }
             }
             .mapStyle(.standard(emphasis: .muted))
@@ -90,14 +99,46 @@ struct PlacesView: View {
                 MapCompass()
             }
             .sensoryFeedback(.selection, trigger: grab?.id)
+            .safeAreaInset(edge: .bottom) {
+                if let spot = named.first(where: { $0.id == selected }) { resizer(spot) }
+            }
         }
     }
 
+    /// The selected spot's radius, on a slider that spends as much travel on
+    /// 25-200 m as on 200-2000 m.
+    private func resizer(_ spot: Named) -> some View {
+        let radius = resized[spot.id] ?? spot.radius
+        let position = Binding(
+            get: { Foundation.log(radius / Self.minRadius) / Foundation.log(Self.maxRadius / Self.minRadius) },
+            set: { resized[spot.id] = (Self.minRadius * pow(Self.maxRadius / Self.minRadius, $0) / 5).rounded() * 5 })
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(spot.name).font(.headline)
+                Spacer()
+                Text(Measurement(value: radius, unit: UnitLength.meters),
+                     format: .measurement(width: .abbreviated, usage: .asProvided, numberFormatStyle: .number.precision(.fractionLength(0))))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: position, in: 0...1) { Text("Radius") }
+                .accessibilityValue("\(Int(radius)) metres")
+        }
+        .padding()
+        .background(.regularMaterial, in: .rect(cornerRadius: 16))
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+    }
+
+    // The portal's bounds (hearsay/places.py).
+    private static let minRadius = 25.0
+    private static let maxRadius = 2000.0
+
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        if !moved.isEmpty {
+        if !moved.isEmpty || !resized.isEmpty {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Revert") { withAnimation(.snappy) { moved = [:] } }
+                Button("Revert") { withAnimation(.snappy) { moved = [:]; resized = [:] } }
                     .disabled(busy)
             }
             ToolbarItem(placement: .confirmationAction) {
@@ -160,26 +201,34 @@ struct PlacesView: View {
             let listing = try JSONDecoder().decode(Listing.self, from: data)
             named = listing.named.enumerated().map {
                 Named(id: $0.offset, name: $0.element.name,
-                      coordinate: .init(latitude: $0.element.latitude, longitude: $0.element.longitude))
+                      coordinate: .init(latitude: $0.element.latitude, longitude: $0.element.longitude),
+                      radius: $0.element.radius ?? 100)
             }
             unnamed = listing.unnamed.enumerated().map {
                 Unnamed(id: $0.offset, latitude: $0.element.latitude, longitude: $0.element.longitude,
                         minutes: $0.element.minutes)
             }
             moved = [:]
+            resized = [:]
+            selected = nil
             loaded = true
         } catch {
             failure = describe(error)
         }
     }
 
-    /// One move per place with a dragged spot, listing all of its spots.
+    /// One move per place with a dragged or resized spot, listing all of its
+    /// spots, each with its radius, so the others keep theirs.
     private func save() async {
-        let names = Set(named.filter { moved[$0.id] != nil }.map(\.name))
+        let names = Set(named.filter { moved[$0.id] != nil || resized[$0.id] != nil }.map(\.name))
         for name in names.sorted() {
-            let spots = named.filter { $0.name == name }.map { moved[$0.id] ?? $0.coordinate }
-            let at = spots.map { ("at", String(format: "%.6f,%.6f", $0.latitude, $0.longitude)) }
-            guard await post([("action", "move"), ("from", name)] + at) else { return }
+            var fields = [("action", "move"), ("from", name)]
+            for spot in named where spot.name == name {
+                let at = moved[spot.id] ?? spot.coordinate
+                fields += [("at", String(format: "%.6f,%.6f", at.latitude, at.longitude)),
+                           ("radius", String(format: "%.0f", resized[spot.id] ?? spot.radius))]
+            }
+            guard await post(fields) else { return }
         }
         await load()
     }
@@ -244,6 +293,7 @@ struct PlacesView: View {
             let name: String
             let latitude: Double
             let longitude: Double
+            let radius: Double?  // absent from a portal before radii: 100 m
         }
 
         struct Candidate: Decodable {
