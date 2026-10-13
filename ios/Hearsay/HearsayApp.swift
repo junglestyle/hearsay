@@ -66,6 +66,8 @@ struct HearsayApp: App {
                     .tabItem { Label("Recorder", image: "Voiceprint") }
                 VoicesView()
                     .tabItem { Label("Voices", systemImage: "person.wave.2") }
+                PlacesView()
+                    .tabItem { Label("Places", systemImage: "map") }
             }
             .tint(.ink)
         }

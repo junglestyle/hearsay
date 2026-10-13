@@ -294,7 +294,7 @@ fields as the portal's page: action=move, from=name and one at="lat,lon" per
 spot the place should have (all of its spots, the dragged one moved);
 action=name with name, latitude, longitude; action=ignore with the spot's
 latitude and longitude as listed. The web page's clips stay the way to hear
-a spot.
+a spot. Built 2026-10-13 as the app's Places tab (ios/Hearsay/PlacesView.swift).
 
 ## 14. Place as a hint for who is speaking
 
