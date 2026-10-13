@@ -240,6 +240,16 @@ def test_a_spot_where_the_owner_spent_time_can_be_named(portal):
     assert read_places(labels_dir) == [("Chill Room", 26.13, -80.15)]
     assert "About 5 min" in client.get("/places").text
 
+    # The app's map: the token alone, no session; dragging one of a place's two spots keeps both.
+    client.cookies.clear()
+    app = {"Authorization": "Bearer capture-token"}
+    assert client.get("/places.json", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    client.post("/places", headers=app, data={"action": "name", "name": "Chill Room", "latitude": "26.12", "longitude": "-80.14"})
+    places = client.get("/places.json", headers=app).json()
+    assert len(places["named"]) == 2 and places["unnamed"] == []
+    client.post("/places", headers=app, data={"action": "move", "from": "Chill Room", "at": ["26.13,-80.15", "26.125,-80.145"]})
+    assert read_places(labels_dir) == [("Chill Room", 26.13, -80.15), ("Chill Room", 26.125, -80.145)]
+
 
 def test_people_heard_at_a_cluster_s_place_are_offered_for_one_tap(portal):
     client, db_path, labels_dir = portal

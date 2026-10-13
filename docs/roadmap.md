@@ -283,6 +283,17 @@ can be reconstructed from raw later. AirTags were left out: Find My has no
 public API. The state machine is ios/Hearsay/Movement.swift, tested on its
 own (`swift test` in ios/).
 
+Next, in the app: a Places map (Apple's MapKit, so places go to no one new)
+where the owner drags a pin to where a place really is. The portal serves it
+with the capture token as a bearer on each request: GET /places.json lists
+every named spot ({name, latitude, longitude}; a name can have several) and
+the spots to name ({latitude, longitude, minutes}). POST /places, form
+fields as the portal's page: action=move, from=name and one at="lat,lon" per
+spot the place should have (all of its spots, the dragged one moved);
+action=name with name, latitude, longitude; action=ignore with the spot's
+latitude and longitude as listed. The web page's clips stay the way to hear
+a spot.
+
 ## 14. Place as a hint for who is speaking
 
 People are tied to places (the bartender at the Chill Room, a coworker at

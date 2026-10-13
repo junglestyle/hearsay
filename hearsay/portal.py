@@ -5,7 +5,9 @@ through the Cloudflare tunnel. Login is a plain HTML form, not an HTTP auth
 dialog, so password managers can fill it; sessions are HMAC-signed cookies.
 The iPhone app logs in instead with the capture token it already holds
 (POST /login/app, bearer): the portal shows in its Voices tab, and whoever
-holds that token can already send Hearsay audio.
+holds that token can already send Hearsay audio. The app's own Places map
+sends the token on each request instead: GET /places.json, and POST /places
+with the same fields as the page's forms.
 
 Names are written to labels/tags.jsonl, the same durable input reprocess
 reads, with the time spans of the turns heard so they survive
@@ -31,7 +33,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from hearsay.media import HINT as MEDIA_HINT
 from hearsay.people import cluster_name
@@ -204,6 +206,10 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         return hmac.new(session_key.encode(), f"{user}:{expires}".encode(), hashlib.sha256).hexdigest()
 
     def logged_in(request: Request) -> bool:
+        # The iPhone app's own screens (GET /places.json) send the capture token on each request.
+        sent = request.headers.get("authorization", "")
+        if app_token and sent.startswith("Bearer "):
+            return hmac.compare_digest(sent.removeprefix("Bearer ").encode(), app_token.encode())
         expires, _, signature = request.cookies.get(COOKIE, "").partition(".")
         if not expires.isdigit() or int(expires) < time.time():
             return False
@@ -662,6 +668,23 @@ exactly where it is, find it in Maps, drop a pin, copy its coordinates, and past
 <h2>Named</h2><ul>{named or "<li class='muted'>None yet.</li>"}</ul>
 {f"<h2>Not places ({len(ignored)})</h2><ul>{not_places}</ul>" if ignored else ""}""")
 
+    @app.get("/places.json")
+    async def places_json(request: Request) -> Response:
+        """For the iPhone app's map: every named spot, and the spots to name."""
+        if not logged_in(request):
+            return Response(status_code=401)
+        spots = read_places(labels_dir)
+        db = connect()
+        try:
+            readings = db.execute("SELECT at, latitude, longitude FROM locations ORDER BY at").fetchall()
+        finally:
+            db.close()
+        unnamed = unnamed_spots(readings, spots, read_ignored(labels_dir))
+        return JSONResponse({
+            "named": [{"name": name, "latitude": lat, "longitude": lon} for name, lat, lon in spots],
+            "unnamed": [{"latitude": s["latitude"], "longitude": s["longitude"], "minutes": len(s["times"])}
+                        for s in unnamed]})
+
     @app.post("/places")
     async def tag_place(request: Request) -> Response:
         if not logged_in(request):
@@ -684,10 +707,14 @@ exactly where it is, find it in Maps, drop a pin, copy its coordinates, and past
                         "longitude": float(field("longitude"))}, places_path)
         elif action == "forget" and field("from"):
             append_tag({"type": "forget", "name": field("from")}, places_path)
-        elif action == "move" and field("from") and (point := coordinates(field("at"))):
-            # Its spots, where the phone's readings put it, give way to the one point given.
-            append_tag({"type": "forget", "name": field("from")}, places_path)
-            append_tag({"type": "place", "name": field("from"), "latitude": point[0], "longitude": point[1]}, places_path)
+        elif action == "move" and field("from"):
+            # Its spots, where the phone's readings put them, give way to the points given:
+            # one pasted here, or from the app's map each of the place's spots, one dragged.
+            points = [coordinates(at) for at in form.get("at", [])]
+            if points and None not in points:
+                append_tag({"type": "forget", "name": field("from")}, places_path)
+                for lat, lon in points:
+                    append_tag({"type": "place", "name": field("from"), "latitude": lat, "longitude": lon}, places_path)
         return RedirectResponse("/places", status_code=303)
 
     @app.get("/audio/{turn_id}")
