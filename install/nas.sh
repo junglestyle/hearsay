@@ -42,6 +42,18 @@ for dir in "$NAS_LABELS" "$NAS_TRANSCRIPTS" "$NAS_IMPORTS"; do
     chmod 2770 "$dir"
 done
 
+say "Idea Machine's vocab folder $IDEAMACHINE_VOCAB_DIR"
+# The portal mounts it read-only. Made here only if Idea Machine hasn't yet,
+# owned like the stream (the apps group), so Docker doesn't make it root's
+# and lock Idea Machine out of writing vocab.json.
+if [ -d "$IDEAMACHINE_VOCAB_DIR" ]; then
+    echo "exists: $IDEAMACHINE_VOCAB_DIR"
+else
+    install -d -o "$APPS_UID" -g "$APPS_GID" -m 2770 "$IDEAMACHINE_VOCAB_DIR"
+    echo "created: $IDEAMACHINE_VOCAB_DIR (Idea Machine writes vocab.json there)"
+fi
+export IDEAMACHINE_VOCAB_DIR
+
 say "Receiver secret in $NAS_RECEIVER_ENV"
 env_ensure "$NAS_RECEIVER_ENV" HEARSAY_SECRET "$(openssl rand -hex 32)"
 

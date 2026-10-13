@@ -17,7 +17,8 @@ closer where it and Whisper disagreed most (7 to 3), but skipped some short
 interjections Whisper caught (3 of 6 where one side was empty).
 
 A transcript records the sha256 of the WAV it was made from and the settings
-used. Reprocess only uses it for that exact WAV. When either changes, the
+used, including the words Parakeet was nudged toward (hearsay/words.py).
+Reprocess only uses it for that exact WAV. When either changes, the
 conversation is transcribed again on the next run.
 """
 
@@ -30,10 +31,13 @@ import tempfile
 import wave
 from pathlib import Path
 
+from hearsay.words import boosted
+
 NAS = "nas"
 DB = "/mnt/storage/hearsay/db/hearsay.sqlite"
 AUDIO_DIR = "/mnt/storage/hearsay/audio"
 TRANSCRIPTS_DIR = "/mnt/storage/hearsay/transcripts"
+WORDS = "/mnt/storage/hearsay/labels/words.json"
 DEVICE = "cuda"
 SETTINGS = {
     # Detects the language itself; it has no setting to force one.
@@ -55,6 +59,10 @@ SETTINGS = {
 # (a 3-hour conversation in one pass wanted 32 GB), and NVIDIA's local-attention
 # workaround lost punctuation and words on real conversations.
 PIECE_SECONDS = 300
+# How hard Parakeet leans toward the operator's words (NeMo's GPU phrase
+# boosting; its default, 0, is off). Not measured yet: a cautious start,
+# since boosting too hard hears the words where they weren't said.
+BOOST_ALPHA = 0.5
 
 # Runs on the NAS: prints {conversation_id: [wav_sha256, settings]} for the transcripts there.
 EXISTING_SCRIPT = """
@@ -73,15 +81,23 @@ def ssh(command: list[str], stdin: bytes = b"") -> bytes:
                           capture_output=True, check=True).stdout
 
 
-def pending() -> list[dict]:
+def current_settings() -> dict:
+    """SETTINGS, plus the words committed on the portal's Words page. Without
+    any, exactly SETTINGS, so transcripts from before there were words still count."""
+    committed = ssh(["sh", "-c", f"'cat {WORDS} 2>/dev/null || true'"])
+    words = boosted(json.loads(committed)) if committed.strip() else []
+    return SETTINGS | ({"boost_words": words, "boost_alpha": BOOST_ALPHA} if words else {})
+
+
+def pending(settings: dict) -> list[dict]:
     sql = ("SELECT conversation_id, wav_file, wav_sha256 FROM conversation_audio"
            " WHERE wav_file IS NOT NULL AND wav_sha256 IS NOT NULL ORDER BY conversation_id")
     rows = json.loads(ssh(["sqlite3", "-json", DB, f'"{sql}"']) or b"[]")
     existing = json.loads(ssh(["python3", "-", TRANSCRIPTS_DIR], EXISTING_SCRIPT.encode()))
-    return [r for r in rows if existing.get(r["conversation_id"]) != [r["wav_sha256"], SETTINGS]]
+    return [r for r in rows if existing.get(r["conversation_id"]) != [r["wav_sha256"], settings]]
 
 
-def load_models(hf_token: str):
+def load_models(hf_token: str, settings: dict):
     # Imported here: these are only installed in the GPU environment.
     import nemo.collections.asr as nemo_asr
     import torch
@@ -97,6 +113,11 @@ def load_models(hf_token: str):
     decoding = asr.cfg.decoding
     with open_dict(decoding):
         decoding.confidence_cfg = {"preserve_token_confidence": True, "method_cfg": {"name": "max_prob"}}
+        if settings.get("boost_words"):
+            # Phrase boosting needs the batched greedy decoder, Parakeet's default.
+            decoding.strategy = "greedy_batch"
+            decoding.greedy.boosting_tree = {"key_phrases_list": settings["boost_words"]}
+            decoding.greedy.boosting_tree_alpha = settings["boost_alpha"]
     asr.change_decoding_strategy(decoding)
 
     diarize = Pipeline.from_pretrained(SETTINGS["diarization_model"], token=hf_token).to(torch.device(DEVICE))
@@ -191,12 +212,13 @@ def main() -> None:
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
         sys.exit("HF_TOKEN is not set (it lives in ~/.config/hearsay/dev.env)")
-    todo = pending()
+    settings = current_settings()
+    todo = pending(settings)
     print(f"{len(todo)} conversation(s) to transcribe.")
     if not todo:
         return
 
-    models = load_models(hf_token)
+    models = load_models(hf_token, settings)
     failed = 0
     for row in todo:
         conversation_id = row["conversation_id"]
@@ -214,7 +236,7 @@ def main() -> None:
                 failed += 1
                 continue
         transcript = {"conversation_id": conversation_id, "wav_sha256": row["wav_sha256"],
-                      "settings": SETTINGS, "segments": segments}
+                      "settings": settings, "segments": segments}
         target = f"{TRANSCRIPTS_DIR}/{conversation_id}.json"
         ssh(["sh", "-c", f"'cat > {target}.tmp && mv {target}.tmp {target}'"], json.dumps(transcript).encode())
         print(f"  {conversation_id}: {len(segments)} segments")

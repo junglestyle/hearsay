@@ -14,6 +14,8 @@ NAS_TRANSCRIPTS="$NAS_ROOT/transcripts"
 NAS_IMPORTS="$NAS_ROOT/imports"
 NAS_LOGS="$NAS_ROOT/logs"
 NAS_STREAM="$NAS_ROOT/stream"
+# Idea Machine's, not Hearsay's: it writes vocab.json there for the portal's Words page.
+IDEAMACHINE_VOCAB_DIR="/mnt/storage/ideamachine/vocab"
 NAS_RECEIVER_ENV="$NAS_CONFIG/receiver.env"
 NAS_TUNNEL_ENV="$NAS_CONFIG/tunnel.env"
 NAS_PORTAL_ENV="$NAS_CONFIG/portal.env"

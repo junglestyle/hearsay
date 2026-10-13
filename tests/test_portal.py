@@ -378,3 +378,37 @@ def test_a_person_s_least_like_turns_can_be_confirmed(portal):
                             follow_redirects=False)
     assert confirmed.headers["location"] == "/person/Alice"
     assert "Least like" not in client.get("/person/Alice").text
+
+
+def test_words_wait_in_a_draft_and_update_commits_them_with_lattice_s_all_at_once(portal, tmp_path):
+    _, db_path, labels_dir = portal
+    vocab = tmp_path / "vocab.json"
+    vocab.write_text(json.dumps({"format_version": 1, "terms": [
+        {"term": "goetia", "source": "repair", "heard_as": "go Asia"}, {"term": "Gurdjieff", "source": "archive"}]}))
+    client = TestClient(create_app(db_path, tmp_path / "audio", labels_dir, "me", "correct horse", "k" * 64,
+                                   vocab_path=vocab))
+    log_in(client)
+
+    client.post("/words", data={"action": "save", "words": "  Siobhan\n\nhyperstition\nSiobhan\n"})
+    page = client.get("/words").text
+    assert "hyperstition\nSiobhan</textarea>" in page  # tidied, in order regardless of case
+    assert not (labels_dir / "words.json").exists()  # a draft isn't committed
+
+    # Lattice approves another word after the page was shown: that page's Update commits nothing.
+    seen = page.split("name='seen' value='")[1].split("'")[0]
+    vocab.write_text(json.dumps({"format_version": 1, "terms": [
+        {"term": "goetia", "source": "repair"}, {"term": "Gurdjieff", "source": "archive"}, {"term": "Kabbalah", "source": "archive"}]}))
+    stale = client.post("/words", data={"action": "update", "seen": seen}, follow_redirects=False)
+    assert "changed" in stale.headers["location"] and not (labels_dir / "words.json").exists()
+
+    seen = client.get("/words").text.split("name='seen' value='")[1].split("'")[0]
+    client.post("/words", data={"action": "update", "seen": seen})
+    assert json.loads((labels_dir / "words.json").read_text()) == {
+        "typed": ["hyperstition", "Siobhan"], "lattice": ["goetia", "Gurdjieff", "Kabbalah"]}
+    assert not (labels_dir / "words.draft.txt").exists()
+    assert "name='seen'" not in client.get("/words").text  # nothing left to update
+
+    # Unreadable Lattice words never commit as "Lattice has none".
+    vocab.write_text(json.dumps({"format_version": 2, "terms": []}))
+    client.post("/words", data={"action": "save", "words": "Siobhan"})
+    assert "name='seen'" not in client.get("/words").text

@@ -33,10 +33,13 @@ services:
       HEARSAY_DB: /data/db/hearsay.sqlite
       HEARSAY_AUDIO_DIR: /data/audio
       HEARSAY_LABELS_DIR: /data/labels
+      HEARSAY_VOCAB_FILE: /data/vocab/vocab.json
     volumes:
       - /mnt/storage/hearsay/db:/data/db:ro
       - /mnt/storage/hearsay/audio:/data/audio:ro
       - /mnt/storage/hearsay/labels:/data/labels
+      # Words Idea Machine writes for the Words page (hearsay/words.py); read only.
+      - ${IDEAMACHINE_VOCAB_DIR:-/mnt/storage/ideamachine/vocab}:/data/vocab:ro
     ports:
       - "${HEARSAY_LAN_IP:-127.0.0.1}:8788:8000"
       - "${HEARSAY_TAILNET_IP:-127.0.0.2}:8788:8000"

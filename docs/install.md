@@ -224,6 +224,14 @@ as one-tap names above its name box; a place never names anyone on its own.
 A cluster that sounds like the TV or video you've tagged `_media` before
 has its Media button picked out.
 
+The portal's Words page lists words transcription leans toward (names,
+jargon). Type them one per line and save a draft; it shows what would change
+and waits as long as you like. Update commits them together with the words
+you approved in Lattice, which Idea Machine writes to
+`/mnt/storage/ideamachine/vocab/vocab.json` (`nas.sh` makes the folder if
+Idea Machine hasn't, and the portal only reads it). Each Update re-transcribes
+every conversation on the dev box's next run, so batch your edits.
+
 Names are stored on the segments you heard, in `/mnt/storage/hearsay/labels/`,
 so they survive reclustering and apply to every past conversation. The portal
 shows them immediately; the database picks them up on the next reprocess.
