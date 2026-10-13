@@ -22,7 +22,12 @@ from hearsay.speakers import mean_unit
 # per-turn clustering at 0.40 gave 189 clusters with named people split three
 # ways; per-speaker gave 21, each named person in one, and no clusters mixing
 # names. Tune with `python -m hearsay.label report`: many "mixed" clusters,
-# raise it; one person over many clusters, lower it.
+# raise it; one person over many clusters, lower it. Checked again
+# 2026-10-13, hiding each of 63 named speakers in turn: 0.40 brings 35 back to
+# their person with 2 wrong; 0.33 gains 4 for 1 more wrong (24 turns), and
+# ECAPA2, WavLM and WeSpeaker's ResNet34, ResNet293 and CAM++ do no better
+# at as few wrong (CAM++ 37). Most left to name are split voices, held back
+# on purpose (group_people), or rank another person closer in every model.
 CLUSTER_THRESHOLD = 0.40
 
 # Speech a voice needs, when a speaker marked mixed is split, to count as a
