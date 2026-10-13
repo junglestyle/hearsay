@@ -10,7 +10,8 @@ import Foundation
 /// While moving, a precise fix about every movingInterval. Settling takes two
 /// usable fixes at least minSpan apart that agree within their accuracy, with
 /// no confident walking, cycling or driving between them: that makes an
-/// anchor, watched by a geofence, and fixes stop. Core Motion saying
+/// anchor, watched by a geofence, and fixes stop. Walking only delays it:
+/// precise fixes that keep agreeing for lingerSpan settle anyway. Core Motion saying
 /// stationary for settleDwell asks for those fixes sooner. Right after
 /// driving it takes vehicleDwell, so a red light or a queue doesn't settle,
 /// until the owner walks or the car disconnects (an arrival). Leaving is only suspected (the geofence,
@@ -59,6 +60,8 @@ struct Movement {
     static let settleDwell = 180.0
     static let vehicleDwell = 600.0
     static let minSpan = 120.0
+    /// Fixes agreeing this long settle even while walking: going nowhere.
+    static let lingerSpan = 600.0
     static let confirmDelay = 60.0
     static let checkInterval = 1800.0
     static let heartbeat = 300.0
@@ -123,17 +126,29 @@ struct Movement {
         let dwell = droveLast ? Self.vehicleDwell : Self.minSpan
         if let earlier = fixes.dropLast().last(where: { fix.at - $0.at >= dwell && agree($0, fix) }),
            lastMoving < earlier.at, !movingNow(at: fix.at) {
-            let used = fixes.filter { $0.at >= earlier.at && agree($0, fix) }
-            let weights = used.map { 1 / max($0.accuracy, 5) / max($0.accuracy, 5) }
-            let total = weights.reduce(0, +)
-            let center = Anchor(
-                latitude: zip(used, weights).map { $0.latitude * $1 }.reduce(0, +) / total,
-                longitude: zip(used, weights).map { $0.longitude * $1 }.reduce(0, +) / total,
-                radius: max(Self.minRadius, 1.5 * used.map(\.accuracy).max()!))
             let still = activity.kind == .stationary && activity.confidence >= .medium
-            return settle(at: center, confidence: still ? 0.9 : 0.7, reason: .settled, now: fix.at)
+            return settle(at: center(of: fixes.filter { $0.at >= earlier.at && agree($0, fix) }),
+                          confidence: still ? 0.9 : 0.7, reason: .settled, now: fix.at)
+        }
+        // Moving about one spot (a party, a dance class) is staying there: where
+        // the fixes are outweighs the walking. Not after driving: a jam isn't a stay.
+        if !droveLast, let earlier = fixes.dropLast().last(where: { fix.at - $0.at >= Self.lingerSpan }) {
+            let used = fixes.filter { $0.at >= earlier.at }
+            if used.count >= 3, used.allSatisfy({ $0.accuracy <= Self.goodAccuracy && agree($0, fix) }) {
+                return settle(at: center(of: used), confidence: 0.5, reason: .settled, now: fix.at)
+            }
         }
         return classify(at: fix.at)
+    }
+
+    /// Weighted towards the sharper fixes, wide enough for the worst of them.
+    private func center(of used: [Fix]) -> Anchor {
+        let weights = used.map { 1 / max($0.accuracy, 5) / max($0.accuracy, 5) }
+        let total = weights.reduce(0, +)
+        return Anchor(
+            latitude: zip(used, weights).map { $0.latitude * $1 }.reduce(0, +) / total,
+            longitude: zip(used, weights).map { $0.longitude * $1 }.reduce(0, +) / total,
+            radius: max(Self.minRadius, 1.5 * used.map(\.accuracy).max()!))
     }
 
     mutating func activity(_ kind: Activity, _ confidence: Confidence, at now: Double) -> [Effect] {

@@ -283,7 +283,9 @@ can be reconstructed from raw later. AirTags were left out: Find My has no
 public API. The state machine is ios/Hearsay/Movement.swift, tested on its
 own (`swift test` in ios/). Paused with paused audio kept on the phone, it
 keeps tracking into the paused window, so its records reach the NAS only
-with the stretches the owner uploads.
+with the stretches the owner uploads. Walking only delays settling: precise fixes that
+keep agreeing for 10 minutes settle anyway (at lower confidence), so a
+party or a dance class is a stay; not after driving, so a jam isn't.
 
 Next, in the app: a Places map (Apple's MapKit, so places go to no one new)
 where the owner drags a pin to where a place really is. The portal serves it
@@ -295,6 +297,12 @@ spot the place should have (all of its spots, the dragged one moved);
 action=name with name, latitude, longitude; action=ignore with the spot's
 latitude and longitude as listed. The web page's clips stay the way to hear
 a spot. Built 2026-10-13 as the app's Places tab (ios/Hearsay/PlacesView.swift).
+
+Later, low priority: a radius per named spot, for places bigger than 100 m (a
+festival ground). Operator input in labels/places.jsonl like the name,
+used by hearsay/places.py in place of the fixed RADIUS, served in
+/places.json and drawn on the app's map as a circle (MapKit's MapCircle) to
+resize. Until then, several spots under one name cover a big place.
 
 ## 14. Place as a hint for who is speaking
 

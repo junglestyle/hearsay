@@ -121,6 +121,39 @@ final class MovementTests: XCTestCase {
         XCTAssertEqual(s.movement.state, .stationary)
     }
 
+    /// A party or a dance class: walking all along, fixes every 5 minutes, going nowhere.
+    func testWalkingAboutOneSpotSettlesOnceFixesAgreeForTenMinutes() {
+        var s = Session()
+        _ = s.movement.recording(true, at: 0)
+        _ = s.movement.fix(fix(5, 0))
+        var offsets = [25.0, -15.0]
+        while s.movement.state != .stationary && s.now < 1200 {
+            _ = s.movement.activity(.walking, .high, at: s.now)
+            s.run(until: s.now + 60)
+            if s.take().contains(.requestFix(precise: true)), !offsets.isEmpty {
+                _ = s.movement.fix(fix(s.now + 5, offsets.removeFirst()))
+            }
+        }
+        XCTAssertEqual(s.movement.state, .stationary)
+        XCTAssertLessThan(s.now, 700)  // the third fix, 10 minutes after the first
+    }
+
+    func testWalkingSomewhereDoesNotSettle() {
+        var s = Session()
+        _ = s.movement.recording(true, at: 0)
+        _ = s.movement.fix(fix(5, 0))
+        var along = 0.0
+        while s.now < 1800 {
+            _ = s.movement.activity(.walking, .high, at: s.now)
+            s.run(until: s.now + 60)
+            if s.take().contains(.requestFix(precise: true)) {
+                along += 400
+                _ = s.movement.fix(fix(s.now + 5, along))
+            }
+        }
+        XCTAssertEqual(s.movement.state, .walking)
+    }
+
     func testARedLightOrAQueueDoesNotSettle() {
         var s = Session()
         _ = s.movement.recording(true, at: 0)
