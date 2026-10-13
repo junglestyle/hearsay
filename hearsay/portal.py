@@ -22,12 +22,13 @@ import html
 import io
 import json
 import os
+import re
 import sqlite3
 import time
 import wave
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, unquote
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -161,6 +162,17 @@ def samples(turns: list[dict]) -> list[dict]:
             conversations.add(s["conversation_id"])
     picked += [s for s in by_length if s not in picked]
     return picked[:SAMPLES]
+
+
+def coordinates(text: str) -> tuple[float, float] | None:
+    """Latitude and longitude from pasted text: "26.12, -80.14", or an Apple or
+    Google Maps link that has them in it (ll=, q=, @). Not an address: looking
+    one up would send it to a geocoding service."""
+    found = re.search(r"(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)", unquote(text))
+    if not found:
+        return None
+    lat, lon = float(found[1]), float(found[2])
+    return (lat, lon) if abs(lat) <= 90 and abs(lon) <= 180 else None
 
 
 def heard_at_spot(spot_times: list[float], times: list[float], turns: list[tuple]) -> list[tuple]:
@@ -611,7 +623,10 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
                       f"<form class='clip' method='post' action='/places'><input type='hidden' name='from' value='{html.escape(name)}'>"
                       "<input name='name' placeholder='New name (an existing one merges them)' autocomplete='off'>"
                       "<button type='submit' name='action' value='rename'>Rename</button>"
-                      "<button type='submit' name='action' value='forget' formnovalidate>Forget</button></form></li>")
+                      "<button type='submit' name='action' value='forget' formnovalidate>Forget</button></form>"
+                      f"<form class='clip' method='post' action='/places'><input type='hidden' name='from' value='{html.escape(name)}'>"
+                      "<input name='at' placeholder='Coordinates or a Maps link' autocomplete='off' required>"
+                      "<button type='submit' name='action' value='move'>Move here</button></form></li>")
         reading_times = [at for at, _, _ in readings]
         unnamed = ""
         for spot in unnamed_spots(readings, spots, ignored):
@@ -641,7 +656,8 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
 <p><a href="/">← Speakers</a></p>
 <h1>Places</h1>
 <p class="muted">Where conversations happened, from the phone's location while it records. Only names you give
-reach the stream, never coordinates; a reading counts as a place within 100 m of it.</p>
+reach the stream, never coordinates; a reading counts as a place within 100 m of it. To put a place
+exactly where it is, find it in Maps, drop a pin, copy its coordinates, and paste them under Move here.</p>
 <h2>To name</h2><ul>{unnamed or "<li class='muted'>Nowhere new.</li>"}</ul>
 <h2>Named</h2><ul>{named or "<li class='muted'>None yet.</li>"}</ul>
 {f"<h2>Not places ({len(ignored)})</h2><ul>{not_places}</ul>" if ignored else ""}""")
@@ -668,6 +684,10 @@ reach the stream, never coordinates; a reading counts as a place within 100 m of
                         "longitude": float(field("longitude"))}, places_path)
         elif action == "forget" and field("from"):
             append_tag({"type": "forget", "name": field("from")}, places_path)
+        elif action == "move" and field("from") and (point := coordinates(field("at"))):
+            # Its spots, where the phone's readings put it, give way to the one point given.
+            append_tag({"type": "forget", "name": field("from")}, places_path)
+            append_tag({"type": "place", "name": field("from"), "latitude": point[0], "longitude": point[1]}, places_path)
         return RedirectResponse("/places", status_code=303)
 
     @app.get("/audio/{turn_id}")

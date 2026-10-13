@@ -14,7 +14,7 @@ from hearsay.assemble import SCHEMA as ASSEMBLE_SCHEMA  # noqa: E402
 from hearsay.parse import SCHEMA as PARSE_SCHEMA  # noqa: E402
 from hearsay.media import SCHEMA as MEDIA_SCHEMA  # noqa: E402
 from hearsay.people import group_people  # noqa: E402
-from hearsay.places import SCHEMA as PLACES_SCHEMA  # noqa: E402
+from hearsay.places import SCHEMA as PLACES_SCHEMA, read_places  # noqa: E402
 from hearsay.portal import create_app  # noqa: E402
 from hearsay.speakers import SCHEMA as SPEAKERS_SCHEMA  # noqa: E402
 from hearsay.turns import SCHEMA as TURNS_SCHEMA, record_operator_input  # noqa: E402
@@ -233,6 +233,12 @@ def test_a_spot_where_the_owner_spent_time_can_be_named(portal):
     assert "Nowhere new." in page and "<strong>Chill Room</strong>" in page
     [record] = [json.loads(line) for line in (labels_dir / "places.jsonl").read_text().splitlines()]
     assert (record["type"], record["name"], record["latitude"]) == ("place", "Chill Room", 26.12)
+
+    # Anchored where it really is, from a pasted Maps link; readings near the old spot are offered again.
+    client.post("/places", data={"action": "move", "from": "Chill Room",
+                                 "at": "https://maps.apple.com/?ll=26.13000%2C-80.15000&q=Pin"})
+    assert read_places(labels_dir) == [("Chill Room", 26.13, -80.15)]
+    assert "About 5 min" in client.get("/places").text
 
 
 def test_people_heard_at_a_cluster_s_place_are_offered_for_one_tap(portal):
