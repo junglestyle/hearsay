@@ -37,7 +37,8 @@ CREATE TABLE turn_people (
     cluster TEXT NOT NULL,           -- smallest turn_id in the cluster; changes as data grows
     person TEXT,                     -- operator's name for the cluster, NULL if unnamed or conflicting
     name_conflict INTEGER NOT NULL,  -- 1 if the cluster's tagged turns carry different names
-    split INTEGER NOT NULL           -- 1 if its diarized speaker was split in voices
+    split INTEGER NOT NULL,          -- 1 if its diarized speaker was split in voices
+    fit REAL                         -- cosine to its cluster's mean voice; NULL if not clustered by voice
 );
 """
 
@@ -242,15 +243,23 @@ def group_people(db_path: Path) -> dict:
                 if (conversation_id, diar_speaker) in split:
                     split.add(turn_id)
 
+        # How well each clustered turn fits its cluster's voice: the portal
+        # offers a person's worst fits for the operator to check.
+        embeddings = {turn_id: list(array("f", embedding)) for turn_id, _, _, _, embedding in rows}
+        fit = {}
+        for c, turn_ids in named_by.items():
+            center = mean_unit([embeddings[t] for t in turn_ids])
+            fit |= {t: round(sum(a * b for a, b in zip(embeddings[t], center)), 3) for t in turn_ids}
+
         out = []
         for c, turn_ids in members.items():
             person, conflict = cluster_name(named_by[c], names)
-            out += [(t, min(turn_ids), person, int(conflict), int(t in split)) for t in turn_ids]
-        out += [(t, t, clips[t], 0, 0) for (t,) in db.execute("SELECT turn_id FROM turn_speakers WHERE label = 'not_owner'")
+            out += [(t, min(turn_ids), person, int(conflict), int(t in split), fit.get(t)) for t in turn_ids]
+        out += [(t, t, clips[t], 0, 0, None) for (t,) in db.execute("SELECT turn_id FROM turn_speakers WHERE label = 'not_owner'")
                 if t in clips]
 
         db.executescript(SCHEMA)
-        db.executemany("INSERT INTO turn_people VALUES (?,?,?,?,?)", sorted(out))
+        db.executemany("INSERT INTO turn_people VALUES (?,?,?,?,?,?)", sorted(out))
         db.commit()
     finally:
         db.close()

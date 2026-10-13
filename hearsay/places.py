@@ -14,6 +14,10 @@ labels/places.jsonl, one record per line:
         second spot with the same name makes both that place (a big venue)
     {"type": "rename", "from", "to"}  renaming onto an existing name merges them
     {"type": "forget", "name"}  every spot with that name
+    {"type": "ignore", "latitude", "longitude"}  not a place: readings near it
+        are no longer offered for naming (a road, a friend's street). Never
+        reaches the stream, which only names named places.
+    {"type": "unignore", "latitude", "longitude"}  offered again
 """
 
 import bisect
@@ -61,6 +65,19 @@ def read_places(labels_dir: Path) -> list[tuple[str, float, float]]:
         elif record["type"] == "forget":
             spots = [s for s in spots if s[0] != record["name"]]
     return spots
+
+
+def read_ignored(labels_dir: Path) -> list[tuple[float, float]]:
+    """(latitude, longitude) of each spot the operator said isn't a place."""
+    path = labels_dir / "places.jsonl"
+    ignored = []
+    for line in (path.read_text().splitlines() if path.exists() else []):
+        record = json.loads(line)
+        if record["type"] == "ignore":
+            ignored.append((record["latitude"], record["longitude"]))
+        elif record["type"] == "unignore":
+            ignored = [s for s in ignored if s != (record["latitude"], record["longitude"])]
+    return ignored
 
 
 def nearest(latitude: float, longitude: float, spots: list[tuple[str, float, float]]) -> str | None:
@@ -114,8 +131,9 @@ def find_places(db_path: Path, labels_dir: Path) -> dict:
 MIN_SPOT_READINGS = 3
 
 
-def unnamed_spots(readings: list[tuple[float, float, float]], spots: list[tuple[str, float, float]]) -> list[dict]:
-    """Where the owner spent time that no named place is near, most time first.
+def unnamed_spots(readings: list[tuple[float, float, float]], spots: list[tuple[str, float, float]],
+                  ignored: list[tuple[float, float]] = ()) -> list[dict]:
+    """Where the owner spent time that no named or ignored place is near, most time first.
 
     readings are (at, latitude, longitude). Each joins the first spot whose
     centre is within RADIUS, or starts one; a spot's centre is the mean of
@@ -123,7 +141,7 @@ def unnamed_spots(readings: list[tuple[float, float, float]], spots: list[tuple[
     """
     found = []
     for at, lat, lon in readings:
-        if nearest(lat, lon, spots):
+        if nearest(lat, lon, spots) or any(metres(lat, lon, a, b) <= RADIUS for a, b in ignored):
             continue
         for spot in found:
             if metres(lat, lon, spot["latitude"], spot["longitude"]) <= RADIUS:

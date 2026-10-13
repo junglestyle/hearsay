@@ -269,3 +269,59 @@ def test_a_cluster_that_sounds_like_tagged_media_offers_media_for_one_tap(portal
     client.post(f"/cluster/{cluster_a}", data={"suggested": "_media"})
     record = json.loads((labels_dir / "tags.jsonl").read_text().splitlines()[-1])
     assert (record["name"], record["via"], len(record["at"])) == ("_media", "media", 4)  # a category takes the whole cluster
+
+
+def test_a_spot_that_isnt_a_place_stops_being_offered(portal):
+    from hearsay.conversations import SCHEMA as CONVERSATIONS_SCHEMA
+
+    client, db_path, labels_dir = portal
+    log_in(client)
+    db = sqlite3.connect(db_path)
+    db.executescript(CONVERSATIONS_SCHEMA + PLACES_SCHEMA)
+    db.executemany("INSERT INTO locations VALUES ('p', ?, 26.12, -80.14, 65)", [(1_790_000_000 + 60 * i,) for i in range(5)])
+    db.commit()
+    db.close()
+
+    client.post("/places", data={"action": "ignore", "latitude": "26.120000", "longitude": "-80.140000"})
+    page = client.get("/places").text
+    assert "Nowhere new." in page and "Not places (1)" in page
+    client.post("/places", data={"action": "unignore", "latitude": "26.120000", "longitude": "-80.140000"})
+    assert "About 5 min" in client.get("/places").text
+
+
+def test_a_cluster_tagged_with_two_names_is_offered_to_check(portal):
+    client, db_path, labels_dir = portal
+    log_in(client)
+    db = sqlite3.connect(db_path)
+    cluster_a = db.execute("SELECT cluster FROM turn_people WHERE turn_id = 'a0'").fetchone()[0]
+    db.close()
+    client.post(f"/cluster/{cluster_a}", data={"action": "name", "name": "Alice"})  # a0, a2, a4
+    with open(labels_dir / "tags.jsonl", "a") as f:  # an older tag that heard someone else in a6
+        f.write(json.dumps({"type": "name", "at": [["2026-01-01T00:00:30+00:00", "2026-01-01T00:00:34+00:00"]],
+                            "name": "Bob", "tagged_at": "2026-01-01T00:00:00+00:00"}) + "\n")
+
+    index = client.get("/").text
+    assert "To check (1)" in index and "People (0)" in index
+    page = client.get(f"/cluster/{cluster_a}").text
+    assert "Tagged Alice and Bob" in page and "Tagged differently" in page and "/audio/a6" in page
+
+    client.post(f"/cluster/{cluster_a}", data={"action": "name", "name": "Alice"})  # settles it
+    index = client.get("/").text
+    assert "To check" not in index and "Alice" in index
+
+
+def test_a_person_s_least_like_turns_can_be_confirmed(portal):
+    client, db_path, labels_dir = portal
+    log_in(client)
+    db = sqlite3.connect(db_path)
+    cluster_a = db.execute("SELECT cluster FROM turn_people WHERE turn_id = 'a0'").fetchone()[0]
+    db.close()
+    client.post(f"/cluster/{cluster_a}", data={"action": "name", "name": "Alice"})  # the samples, a0, a2, a4
+    reprocess_people(db_path, labels_dir)
+
+    page = client.get("/person/Alice").text
+    assert "Least like Alice" in page and "/audio/a6" in page and "/audio/a0" not in page
+    confirmed = client.post(f"/cluster/{cluster_a}/clip", data={"turn_id": "a6", "confirm": "Alice", "back": "/person/Alice"},
+                            follow_redirects=False)
+    assert confirmed.headers["location"] == "/person/Alice"
+    assert "Least like" not in client.get("/person/Alice").text
