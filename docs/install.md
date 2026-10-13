@@ -210,8 +210,10 @@ single clip that isn't the speaker (a cough, a video, someone else) can be
 tagged on its own, under its player: only that turn takes the tag. A named
 cluster can be renamed, or its name forgotten, from its page; a person can be
 renamed everywhere at once from theirs (renaming onto an existing name merges
-the two). Names starting with `_` (`_noise`, `_media`, `_stranger`) are for
-categories, not people.
+the two). Names starting with `_` are
+categories, not people: Media, Music, Noise and Stranger each have a button,
+on the cluster and under each clip (`_media` is TV or video talk, `_music`
+is songs, so the media hint learns from talk alone).
 
 The portal's Places page lists spots where the phone recorded and no named
 place is near (how long, which days, who was heard there, a map link); name
@@ -219,7 +221,7 @@ them there. Only these names reach the stream, never coordinates.
 A cluster heard at a named place offers the people heard most at that place
 as one-tap names above its name box; a place never names anyone on its own.
 A cluster that sounds like the TV or video you've tagged `_media` before
-offers `_media` the same way.
+has its Media button picked out.
 
 Names are stored on the segments you heard, in `/mnt/storage/hearsay/labels/`,
 so they survive reclustering and apply to every past conversation. The portal

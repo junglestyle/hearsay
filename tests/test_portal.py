@@ -287,10 +287,15 @@ def test_a_cluster_that_sounds_like_tagged_media_offers_media_for_one_tap(portal
     db.commit()
     db.close()
 
-    assert "Looks like media" in client.get(f"/cluster/{cluster_a}").text
-    client.post(f"/cluster/{cluster_a}", data={"suggested": "_media"})
+    assert "value='_media' formnovalidate class=hinted>Media" in client.get(f"/cluster/{cluster_a}").text
+    client.post(f"/cluster/{cluster_a}", data={"category": "_media"})
     record = json.loads((labels_dir / "tags.jsonl").read_text().splitlines()[-1])
     assert (record["name"], record["via"], len(record["at"])) == ("_media", "media", 4)  # a category takes the whole cluster
+
+    # A clip's category button wins over its empty name field.
+    client.post(f"/cluster/{cluster_a}/clip", data={"turn_id": "a2", "name": "", "category": "_music"})
+    record = json.loads((labels_dir / "tags.jsonl").read_text().splitlines()[-1])
+    assert (record["type"], record["name"]) == ("clip", "_music")
 
 
 def test_a_spot_that_isnt_a_place_stops_being_offered(portal):

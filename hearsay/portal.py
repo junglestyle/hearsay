@@ -80,6 +80,10 @@ button { font: inherit; width: 100%; padding: 0.8rem; margin-top: 0.6rem; }
 .clip { margin-bottom: 1.2rem; }
 .clip input { padding: 0.4rem; }
 .clip button { padding: 0.4rem; margin-top: 0.3rem; }
+.row { display: flex; gap: 0.5rem; }
+.row button { flex: 1; }
+.clip .row button { font-size: 0.85em; }
+.hinted { font-weight: 600; outline: 2px solid var(--accent); }
 """
 
 
@@ -136,6 +140,17 @@ def name_of(turns: list[dict], names: dict[str, str]) -> tuple[str | None, bool]
     return cluster_name([s["turn_id"] for s in voiced(turns)], names)
 
 
+# What isn't a person, one tap each (hearsay/stream.py leaves out all but _stranger).
+CATEGORIES = {"_media": "Media", "_music": "Music", "_noise": "Noise", "_stranger": "Stranger"}
+
+
+def category_buttons(hinted: str | None = None) -> str:
+    return "<div class='row'>" + "".join(
+        f"<button type='submit' name='category' value='{value}' formnovalidate"
+        f"{' class=hinted' if value == hinted else ''}>{label}</button>"
+        for value, label in CATEGORIES.items()) + "</div>"
+
+
 def clip_player(s: dict, cluster_id: str, tagged: str | None = None, note: str = "", confirm: str | None = None,
                 back: str = "") -> str:
     """A turn's audio, and a form to tag just that clip, take its tag back, or confirm it's `confirm`."""
@@ -150,8 +165,8 @@ def clip_player(s: dict, cluster_id: str, tagged: str | None = None, note: str =
     yes = (f"<button type='submit' name='confirm' value='{html.escape(confirm)}' formnovalidate>"
            f"It's {html.escape(confirm)}</button>" if confirm else "")
     return (f"{audio}{form}<input name='name' list='known' autocomplete='off' autocapitalize='words'"
-            " placeholder='Just this clip: _noise, _media, a name' required>"
-            f"<button type='submit'>Tag clip</button>{yes}</form>")
+            " placeholder='Just this clip: who it is' required>"
+            f"<button type='submit'>Tag clip</button>{yes}{category_buttons()}</form>")
 
 
 def samples(turns: list[dict]) -> list[dict]:
@@ -441,11 +456,7 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             hint = (f"<p class='muted'>Heard at {html.escape(', '.join(places))}:</p>" + "".join(
                 f"<button type='submit' name='suggested' value='{html.escape(p)}' formnovalidate>{html.escape(p)}</button>"
                 for p in suggested))
-        if media:
-            hint += ("<p class='muted'>Sounds like the TV or video you've tagged before:</p>"
-                     "<button type='submit' name='suggested' value='_media' formnovalidate>Looks like media: _media</button>")
-        categories = {"_noise", "_media", "_stranger"}
-        others = sorted(set(names.values()) | set(clips.values()) | categories)
+        others = sorted(n for n in set(names.values()) | set(clips.values()) if not n.startswith("_"))
         known = "".join(f"<option value='{html.escape(n)}'>" for n in suggested + [n for n in others if n not in suggested])
         forget = ("<button type='submit' name='action' value='forget' formnovalidate>Forget this name</button>"
                   if person or conflict else "")
@@ -462,6 +473,8 @@ A clip that isn't this speaker (a cough, a video, someone else) can be tagged on
   <input id="name" name="name" list="known" autocomplete="off" autocapitalize="words">
   <datalist id="known">{known}</datalist>
   <button type="submit" name="action" value="name">Save name</button>
+  <p class="muted">{"Not a person? It sounds like the TV or video you've tagged before." if media else "Not a person?"}</p>
+  {category_buttons("_media" if media else None)}
   <button type="submit" name="action" value="mixed">More than one person</button>
   <button type="submit" name="action" value="skip" formnovalidate>Skip for now</button>
   {forget}
@@ -477,7 +490,7 @@ A clip that isn't this speaker (a cough, a video, someone else) can be tagged on
             return RedirectResponse("/", status_code=303)
         form = parse_qs((await request.body()).decode())
         turn_id = form.get("turn_id", [""])[0]
-        name = " ".join(form.get("name", [""])[0].split())
+        name = form.get("category", [""])[0] or " ".join(form.get("name", [""])[0].split())
         confirm = " ".join(form.get("confirm", [""])[0].split())
         turn = next((s for s in grouped[cluster_id] if s["turn_id"] == turn_id), None)
         span = {"at": [wall(turn["zero_at"], turn["start"], turn["end"])], "turn_ids": [turn_id]} if turn else None
@@ -507,8 +520,11 @@ A clip that isn't this speaker (a cough, a video, someone else) can be tagged on
         # _media when it sounds like tagged media): marked with which hint, so
         # how often each is taken can be counted.
         suggested = " ".join(form.get("suggested", [""])[0].split())
+        category = form.get("category", [""])[0]
         if suggested:
             action, name = "name", suggested
+        elif category in CATEGORIES:
+            action, name = "name", category
         names, _, _, clips = read_tags()
         turns = grouped[cluster_id]
         heard = samples([s for s in turns if s["turn_id"] not in clips])
@@ -535,9 +551,11 @@ A clip that isn't this speaker (a cough, a video, someone else) can be tagged on
             # What the page offered, so hearsay/hints.py can tell a hint
             # passed over from one never offered.
             _, people, media = hints(turns, name_of(turns, names)[0])
+            # The Media button stands out when the media hint offers it: taking it then is taking the hint.
+            via = "place" if suggested else "media" if category == "_media" and media else None
             append_tag({"type": "name", **spans(chosen), "name": name if action == "name" else None,
                         "offered": people + (["_media"] if media else [])}
-                       | ({"via": "media" if suggested == "_media" else "place"} if suggested else {}))
+                       | ({"via": via} if via else {}))
         else:
             return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)
         # Next: the first unskipped cluster; skipped ones only come round again
