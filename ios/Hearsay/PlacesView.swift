@@ -23,13 +23,21 @@ struct PlacesView: View {
         var coordinate: CLLocationCoordinate2D { .init(latitude: latitude, longitude: longitude) }
     }
 
-    /// One recorded while the phone was at a spot: when, who was heard, and
-    /// how it began, to tell where the spot is.
+    /// One recorded while the phone was at a place or spot: when, who was
+    /// heard, and how it began, to tell where it was; `readings` is the span
+    /// of readings that put it there (unix seconds), to correct them.
     struct Conversation: Decodable, Hashable {
         let start: Date
         let end: Date
         let people: [String]
         let opening: String
+        let readings: [Double]?
+    }
+
+    /// The conversations at one named place, for its sheet.
+    struct Visits: Identifiable {
+        let name: String
+        var id: String { name }
     }
 
     @State private var named: [Named] = []
@@ -39,6 +47,8 @@ struct PlacesView: View {
     @State private var selected: Named.ID?
     @State private var grab: (id: Named.ID, offset: CGSize)?
     @State private var naming: Unnamed?
+    @State private var visits: [String: [Conversation]] = [:]
+    @State private var showing: Visits?
     @State private var camera = MapCameraPosition.automatic
     @State private var loaded = false
     @State private var busy = false
@@ -60,8 +70,14 @@ struct PlacesView: View {
         }
         .task { if !loaded { await load() } }
         .sheet(item: $naming) { spot in
-            NameSpot(spot: spot, names: Array(Set(named.map(\.name))).sorted()) { fields in
+            NameSpot(spot: spot, names: placeNames) { fields in
                 naming = nil
+                Task { await send(fields) }
+            }
+        }
+        .sheet(item: $showing) { place in
+            PlaceVisits(name: place.name, conversations: visits[place.name] ?? [], names: placeNames) { fields in
+                showing = nil
                 Task { await send(fields) }
             }
         }
@@ -115,6 +131,8 @@ struct PlacesView: View {
         }
     }
 
+    private var placeNames: [String] { Array(Set(named.map(\.name))).sorted() }
+
     /// The selected spot's radius, on a slider that spends as much travel on
     /// 25-200 m as on 200-2000 m.
     private func resizer(_ spot: Named) -> some View {
@@ -133,6 +151,12 @@ struct PlacesView: View {
             }
             Slider(value: position, in: 0...1) { Text("Radius") }
                 .accessibilityValue("\(Int(radius)) metres")
+            let count = visits[spot.name]?.count ?? 0
+            Button { showing = Visits(name: spot.name) } label: {
+                Label(count == 0 ? "No Conversations Yet" : "Conversations Here (\(count))", systemImage: "text.bubble")
+                    .font(.subheadline)
+            }
+            .disabled(count == 0)
         }
         .padding()
         .background(.regularMaterial, in: .rect(cornerRadius: 16))
@@ -220,6 +244,7 @@ struct PlacesView: View {
                 Unnamed(id: $0.offset, latitude: $0.element.latitude, longitude: $0.element.longitude,
                         minutes: $0.element.minutes, conversations: $0.element.conversations ?? [])
             }
+            visits = listing.visits ?? [:]
             moved = [:]
             resized = [:]
             selected = nil
@@ -316,6 +341,7 @@ struct PlacesView: View {
         }
 
         let named: [Spot]
+        let visits: [String: [Conversation]]?  // absent from an older portal
         let unnamed: [Candidate]
     }
 
@@ -365,23 +391,7 @@ private struct NameSpot: View {
                         Text("None recorded here.").foregroundStyle(.secondary)
                     }
                     ForEach(spot.conversations, id: \.self) { conversation in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(conversation.start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
-                                 + " – " + conversation.end.formatted(date: .omitted, time: .shortened))
-                                .font(.subheadline.weight(.medium))
-                            if !conversation.people.isEmpty {
-                                Text(conversation.people.joined(separator: ", "))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if !conversation.opening.isEmpty {
-                                Text("\u{201C}\(conversation.opening)\u{201D}")
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(3)
-                            }
-                        }
-                        .padding(.vertical, 2)
+                        ConversationRow(conversation: conversation, here: nil, names: names, correct: send)
                     }
                 }
                 Section {
@@ -408,5 +418,84 @@ private struct NameSpot: View {
     private func save() {
         guard !trimmed.isEmpty else { return }
         send([("action", "name"), ("name", trimmed), ("latitude", "\(spot.latitude)"), ("longitude", "\(spot.longitude)")])
+    }
+}
+
+/// A named place's conversations, latest first, each correctable.
+private struct PlaceVisits: View {
+    let name: String
+    let conversations: [PlacesView.Conversation]
+    let names: [String]
+    let correct: ([(String, String)]) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(conversations, id: \.self) { conversation in
+                        ConversationRow(conversation: conversation, here: name, names: names, correct: correct)
+                    }
+                } footer: {
+                    Text("If the phone put one here wrongly, tap \u{22EF} beside it: it wasn\u{2019}t anywhere named, or was at another place. It stays corrected however the place\u{2019}s area changes.")
+                }
+            }
+            .navigationTitle(name)
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+/// When, who and how it began; its menu corrects the readings that put it
+/// here: they were wrong, or were really at another named place.
+private struct ConversationRow: View {
+    let conversation: PlacesView.Conversation
+    let here: String?
+    let names: [String]
+    let correct: ([(String, String)]) -> Void
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(conversation.start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+                     + " – " + conversation.end.formatted(date: .omitted, time: .shortened))
+                    .font(.subheadline.weight(.medium))
+                if !conversation.people.isEmpty {
+                    Text(conversation.people.joined(separator: ", "))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if !conversation.opening.isEmpty {
+                    Text("\u{201C}\(conversation.opening)\u{201D}")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+            Spacer(minLength: 8)
+            if let span = conversation.readings, span.count == 2 {
+                Menu {
+                    Button("Wasn\u{2019}t Here", systemImage: "location.slash", role: .destructive) {
+                        correct([("action", "drop")] + fields(span))
+                    }
+                    Menu("Was At", systemImage: "mappin.and.ellipse") {
+                        ForEach(names.filter { $0 != here }, id: \.self) { name in
+                            Button(name) { correct([("action", "at"), ("name", name)] + fields(span)) }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Correct where this was")
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func fields(_ span: [Double]) -> [(String, String)] {
+        [("start", "\(span[0])"), ("end", "\(span[1])")]
     }
 }
