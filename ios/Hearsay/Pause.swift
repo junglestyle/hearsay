@@ -11,7 +11,8 @@ import Foundation
 /// places them by their own times. Where the owner was goes in the window too
 /// (Location), so a stretch uploaded later still gets its places, and nothing
 /// from a pause reaches the NAS unless uploaded. Windows not kept are deleted
-/// `retention` after they end.
+/// `retention` after they end, and one with no audio (paused while muted)
+/// as soon as it ends: there's nothing in it to hear or keep.
 ///
 /// Audio the pendant stored while away is downloaded on reconnect. If the
 /// app was paused at any time while the pendant was away, all of it is
@@ -60,6 +61,7 @@ final class Pause: ObservableObject {
         pendant.pause = self
         WindowAudio.removeLeftovers()
         expire()
+        for empty in windows where !Self.hasAudio(empty.dir) { delete(empty) }
     }
 
     func pause() {
@@ -190,9 +192,21 @@ final class Pause: ObservableObject {
 
     private func endWindow() {
         window?.seal()
+        if let ended = window?.dir, !Self.hasAudio(ended) {
+            log.info("paused window \(ended.lastPathComponent) has no audio (muted); deleting it")
+            try? FileManager.default.removeItem(at: ended)
+        }
         window = nil
         UserDefaults.standard.removeObject(forKey: Self.windowKey)
         refresh()
+    }
+
+    /// Stops at the first audio record, so a window with audio costs little.
+    private static func hasAudio(_ dir: URL) -> Bool {
+        let files = (try? Spool(dir: dir).pending()) ?? []
+        return files.contains { file in
+            ((try? Spool.records(in: file)) ?? []).contains { $0.kind == Spool.audio || $0.kind == Spool.stored }
+        }
     }
 
     /// nil (so paused audio is dropped) if the window can't be made.
