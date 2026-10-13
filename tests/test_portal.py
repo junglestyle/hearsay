@@ -221,12 +221,16 @@ def test_a_spot_where_the_owner_spent_time_can_be_named(portal):
     db.executescript(CONVERSATIONS_SCHEMA + PLACES_SCHEMA)
     # Readings around the fixture's conversation (its WAV starts at 2026-01-01 00:00 UTC).
     db.executemany("INSERT INTO locations VALUES ('p', ?, 26.12, -80.14, 65)", [(1_767_225_590 + 60 * i,) for i in range(5)])
+    db.execute("INSERT INTO conversations VALUES ('c1', 1_767_225_590, 1_767_225_900, 32, 0)")
     db.commit()
     db.close()
 
     page = client.get("/places").text
     assert "About 5 min" in page and "maps.apple.com/?ll=26.12000,-80.14000" in page
     assert page.count("<audio") == 3  # clips heard there, to tell where it is
+    # The app's map: the conversations there, each with its first words, to tell by what was said.
+    [spot] = client.get("/places.json", headers={"Authorization": "Bearer capture-token"}).json()["unnamed"]
+    assert [(c["start"], c["opening"]) for c in spot["conversations"]] == [(1_767_225_590, "synthetic synthetic")]
 
     client.post("/places", data={"action": "name", "name": "Chill Room", "latitude": "26.12", "longitude": "-80.14"})
     page = client.get("/places").text

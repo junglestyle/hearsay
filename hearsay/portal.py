@@ -54,6 +54,11 @@ MARGINS = 6
 STRAYS = 10
 # Clips played per unnamed place, to tell by ear where it is.
 PLACE_CLIPS = 3
+# For the app's Places map: an unnamed spot's latest conversations, each with
+# its first turns cut short, to tell by what was said where it is.
+SPOT_CONVERSATIONS = 10
+OPENING_TURNS = 2
+OPENING_CHARACTERS = 200
 
 CLUSTERS_SQL = """
 SELECT tp.turn_id, tp.cluster, tp.split, tp.fit, t.conversation_id, t.start, t.end, ca.wav_file, ca.zero_at
@@ -179,6 +184,17 @@ def samples(turns: list[dict]) -> list[dict]:
             conversations.add(s["conversation_id"])
     picked += [s for s in by_length if s not in picked]
     return picked[:SAMPLES]
+
+
+def heard_by_conversation(db: sqlite3.Connection) -> dict[str, set[str]]:
+    """The named people heard in each conversation (categories aren't people)."""
+    heard = {}
+    for conversation_id, person in db.execute(
+        "SELECT DISTINCT t.conversation_id, tp.person FROM turn_people tp JOIN turns t USING (turn_id)"
+        " WHERE tp.person IS NOT NULL AND tp.person NOT LIKE '\\_%' ESCAPE '\\'"
+    ):
+        heard.setdefault(conversation_id, set()).add(person)
+    return heard
 
 
 def coordinates(text: str) -> tuple[float, float] | None:
@@ -657,12 +673,7 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
                      for turn_id, cid, zero_at, start, end in db.execute(
                          "SELECT t.turn_id, t.conversation_id, ca.zero_at, t.start, t.end FROM turns t"
                          " JOIN conversation_audio ca USING (conversation_id) WHERE ca.wav_file IS NOT NULL")]
-            heard = {}
-            for conversation_id, person in db.execute(
-                "SELECT DISTINCT t.conversation_id, tp.person FROM turn_people tp JOIN turns t USING (turn_id)"
-                " WHERE tp.person IS NOT NULL AND tp.person NOT LIKE '\\_%' ESCAPE '\\'"
-            ):
-                heard.setdefault(conversation_id, set()).add(person)
+            heard = heard_by_conversation(db)
             visited = dict(db.execute("SELECT place, count(DISTINCT conversation_id) FROM conversation_places GROUP BY place"))
         finally:
             db.close()
@@ -728,14 +739,30 @@ exactly where it is, find it in Maps, drop a pin, copy its coordinates, and past
         db = connect()
         try:
             readings = db.execute("SELECT at, latitude, longitude FROM locations ORDER BY at").fetchall()
+            conversations = db.execute("SELECT conversation_id, start, end FROM conversations ORDER BY start DESC").fetchall()
+            heard = heard_by_conversation(db)
+            opening = {}
+            for conversation_id, text in db.execute(
+                "SELECT conversation_id, text FROM turns WHERE idx < ? ORDER BY conversation_id, idx", (OPENING_TURNS,)
+            ):
+                opening[conversation_id] = f"{opening.get(conversation_id, '')} {text}".strip()
         finally:
             db.close()
+
+        def at_spot(times: list[float]) -> list[dict]:
+            # Conversations recorded while the phone was there, latest first: to
+            # tell from what was said, and who, where an unnamed spot is.
+            found = [{"start": start, "end": end, "people": sorted(heard.get(cid, ())),
+                      "opening": opening.get(cid, "")[:OPENING_CHARACTERS]}
+                     for cid, start, end in conversations if any(start <= at <= end for at in times)]
+            return found[:SPOT_CONVERSATIONS]
+
         unnamed = unnamed_spots(readings, spots, read_ignored(labels_dir))
         return JSONResponse({
             "named": [{"name": name, "latitude": lat, "longitude": lon, "radius": radius}
                       for name, lat, lon, radius in spots],
-            "unnamed": [{"latitude": s["latitude"], "longitude": s["longitude"], "minutes": len(s["times"])}
-                        for s in unnamed]})
+            "unnamed": [{"latitude": s["latitude"], "longitude": s["longitude"], "minutes": len(s["times"]),
+                         "conversations": at_spot(s["times"])} for s in unnamed]})
 
     @app.post("/places")
     async def tag_place(request: Request) -> Response:

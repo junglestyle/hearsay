@@ -19,7 +19,17 @@ struct PlacesView: View {
         let latitude: Double
         let longitude: Double
         let minutes: Int
+        let conversations: [Conversation]
         var coordinate: CLLocationCoordinate2D { .init(latitude: latitude, longitude: longitude) }
+    }
+
+    /// One recorded while the phone was at a spot: when, who was heard, and
+    /// how it began, to tell where the spot is.
+    struct Conversation: Decodable, Hashable {
+        let start: Date
+        let end: Date
+        let people: [String]
+        let opening: String
     }
 
     @State private var named: [Named] = []
@@ -198,7 +208,9 @@ struct PlacesView: View {
         do {
             let (data, response) = try await Self.session.data(for: request("places.json"))
             try check(response)
-            let listing = try JSONDecoder().decode(Listing.self, from: data)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .secondsSince1970
+            let listing = try decoder.decode(Listing.self, from: data)
             named = listing.named.enumerated().map {
                 Named(id: $0.offset, name: $0.element.name,
                       coordinate: .init(latitude: $0.element.latitude, longitude: $0.element.longitude),
@@ -206,7 +218,7 @@ struct PlacesView: View {
             }
             unnamed = listing.unnamed.enumerated().map {
                 Unnamed(id: $0.offset, latitude: $0.element.latitude, longitude: $0.element.longitude,
-                        minutes: $0.element.minutes)
+                        minutes: $0.element.minutes, conversations: $0.element.conversations ?? [])
             }
             moved = [:]
             resized = [:]
@@ -300,6 +312,7 @@ struct PlacesView: View {
             let latitude: Double
             let longitude: Double
             let minutes: Int
+            let conversations: [Conversation]?  // absent from an older portal
         }
 
         let named: [Spot]
@@ -317,21 +330,19 @@ struct PlacesView: View {
     private static let session = URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil)
 }
 
-/// Name a spot, give it to a place already named (another of its spots), or
-/// say it isn't a place.
+/// What was recorded at a spot, then: name it, give it to a place already
+/// named (another of its spots), or say it isn't a place.
 private struct NameSpot: View {
     let spot: PlacesView.Unnamed
     let names: [String]
     let send: ([(String, String)]) -> Void
     @State private var name = ""
-    @FocusState private var focused: Bool
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     TextField("Name", text: $name)
-                        .focused($focused)
                         .submitLabel(.done)
                         .onSubmit(save)
                     if !names.isEmpty {
@@ -349,6 +360,30 @@ private struct NameSpot: View {
                 } footer: {
                     Text("\(spot.minutes) minutes here. Reusing a name adds this spot to that place. The portal's Places page has clips heard here.")
                 }
+                Section("Conversations Here") {
+                    if spot.conversations.isEmpty {
+                        Text("None recorded here.").foregroundStyle(.secondary)
+                    }
+                    ForEach(spot.conversations, id: \.self) { conversation in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(conversation.start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+                                 + " – " + conversation.end.formatted(date: .omitted, time: .shortened))
+                                .font(.subheadline.weight(.medium))
+                            if !conversation.people.isEmpty {
+                                Text(conversation.people.joined(separator: ", "))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if !conversation.opening.isEmpty {
+                                Text("\u{201C}\(conversation.opening)\u{201D}")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
                 Section {
                     Button("Not a Place", role: .destructive) {
                         send([("action", "ignore"), ("latitude", "\(spot.latitude)"), ("longitude", "\(spot.longitude)")])
@@ -365,8 +400,7 @@ private struct NameSpot: View {
                 }
             }
         }
-        .presentationDetents([.medium])
-        .onAppear { focused = true }
+        .presentationDetents([.medium, .large])
     }
 
     private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }

@@ -307,7 +307,10 @@ NAS side is built: /places.json gives each named spot's radius, and POST
 keeps the place's) and a radius on a name. In the app (2026-10-13), each
 named spot's area is a faint orange circle (MapKit's MapCircle); selecting
 its pin shows a slider (logarithmic, 25 to 2000 m, in 5 m steps), and Save
-sends the place's move with every spot's at and radius.
+sends the place's move with every spot's at and radius. Tapping a spot to
+name lists the conversations recorded there (up to 10, latest first: when,
+the named people heard, and the first two turns' words, from /places.json),
+to tell from what was said where it is; still no audio in the app.
 
 ## 14. Place as a hint for who is speaking
 
