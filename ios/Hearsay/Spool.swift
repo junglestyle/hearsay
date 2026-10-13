@@ -23,6 +23,17 @@ final class Spool {
     /// longitude f64 LE, accuracy in metres f32 LE. Kinds 6 and 7 are the Mac
     /// recorder's.
     static let location: UInt8 = 8
+    /// A Core Motion activity update (Location): its start f64 LE, flags u8
+    /// (bit 0 stationary, 1 walking, 2 running, 3 cycling, 4 automotive,
+    /// 5 unknown), confidence u8 (0 low, 1 medium, 2 high).
+    static let activity: UInt8 = 9
+    /// The phone's Bluetooth and car audio outputs changed (Location): car u8
+    /// (1 if one is the car), then UTF-8 lines of port type, tab, port name.
+    static let route: UInt8 = 10
+    /// A Movement state (Location): state u8 (Movement.State), confidence u8
+    /// (percent), reason u8 (Movement.Reason), then when settled the anchor:
+    /// latitude f64 LE, longitude f64 LE, radius in metres f32 LE.
+    static let movement: UInt8 = 11
 
     let dir: URL
     private let current: URL

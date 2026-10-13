@@ -112,6 +112,10 @@ device="$(env_get "$IOS_ENV" HEARSAY_IOS_DEVICE)"
 devices_json | grep -q "^$device" \
     || die "the phone ($device) isn't reachable; connect it by cable or put it on the same Wi-Fi, unlocked"
 
+say "Testing"
+# Movement (when the app takes location fixes) is plain Swift, tested on the Mac itself.
+(cd "$REPO_DIR/ios" && swift test --quiet) || die "Movement's tests failed; not installing"
+
 say "Building"
 xcodebuild -project "$REPO_DIR/ios/Hearsay.xcodeproj" -target Hearsay -configuration Release \
     -sdk iphoneos -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
@@ -167,12 +171,23 @@ confirm "Is it connected and sending?"
 say "Location while recording"
 # Manual: location permission is the operator's to grant, on the phone.
 cat <<MSG
-While it records, Hearsay notes roughly where you are every 2 minutes, so
-conversations can say which place you named they happened at (the portal's
-Places page); coordinates never reach the stream. When iOS asks, allow
-location, and later choose "Change to Always Allow": the app records in the
-background. Check: Settings > Hearsay > Location says Always.
+While it records, Hearsay notes where you are, so conversations can say
+which place you named they happened at (the portal's Places page);
+coordinates never reach the stream. It takes fixes while you move and
+almost none while you stay put, using Motion & Fitness to tell. When iOS
+asks, allow location and motion, and later choose "Change to Always Allow":
+the app records in the background. Check: Settings > Hearsay > Location says
+Always, and Motion & Fitness is on.
 MSG
-confirm "Is location set to Always?"
+confirm "Is location set to Always, and motion allowed?"
+
+say "Your car (optional)"
+# Manual: only the operator's phone, in the operator's car, can see its Bluetooth.
+cat <<MSG
+Connecting to and leaving the car help tell when a trip starts and ends. In
+the car, with the phone on its Bluetooth, open Hearsay: under Location, tap
+"Use ... as my car". Skip this if you have no car Bluetooth.
+MSG
+confirm "Done, or skipped?"
 
 say "Recording from the phone. The next hourly reprocess on the NAS picks the uploads up."

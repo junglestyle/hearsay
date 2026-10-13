@@ -264,6 +264,25 @@ averaged 8 m accuracy (worst 195 m), sharper than the 100 m asked for. Battery
 use was acceptable at one reading a minute; sampling then went to every 2
 minutes, which loses nothing a conversation's places need.
 
+Revised 2026-10-13, to spend battery only when the owner moves: a precise
+fix when recording starts or resumes and about every 5 minutes on the move;
+staying put (two fixes at least 2 minutes apart agreeing within their
+accuracy, no confident motion between) makes an anchor, and fixes stop.
+Core Motion's activity (still, walking, cycling, driving) asks for fixes
+sooner or later; a geofence, sustained motion, the car connecting or a fix
+every 30 minutes suspects leaving, and a precise fix outside the anchor by
+more than its accuracy confirms it, alone only with motion or the geofence
+agreeing. After driving, settling takes 10 minutes unless the owner walks
+or the car's Bluetooth disconnects, so traffic doesn't settle. The car is
+whichever Bluetooth audio output the owner picks in the app, read from the
+audio route without touching it; it suggests the car is near, never that
+it moves. Settled, the app says every 5 minutes it's still at its anchor,
+and the NAS reads that as a reading. Activity, route changes and every
+state, with its confidence and reason, are records in the upload, so trips
+can be reconstructed from raw later. AirTags were left out: Find My has no
+public API. The state machine is ios/Hearsay/Movement.swift, tested on its
+own (`swift test` in ios/).
+
 ## 14. Place as a hint for who is speaking
 
 People are tied to places (the bartender at the Chill Room, a coworker at

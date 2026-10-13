@@ -42,6 +42,12 @@ enum Settings {
         UserDefaults.standard.string(forKey: portalKey) ?? ""
     }
 
+    /// The Bluetooth audio output that is the owner's car (Location), as iOS names it.
+    static var carName: String {
+        get { UserDefaults.standard.string(forKey: "carName") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "carName") }
+    }
+
     static func save(portal: String) {
         UserDefaults.standard.set(portal.trimmingCharacters(in: .whitespacesAndNewlines), forKey: portalKey)
     }

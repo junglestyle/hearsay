@@ -7,9 +7,13 @@
     <!-- Location: where conversations happened (Location.swift). Only places
          the owner names reach the stream, never coordinates. -->
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Hearsay notes roughly where you are while it records, so conversations can say which place you named they happened at.</string>
+    <string>Hearsay notes where you are while it records, so conversations can say which place you named they happened at.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Hearsay records in the background, so it needs your location then too: roughly where you are, every 2 minutes while recording.</string>
+    <string>Hearsay records in the background, so it needs your location then too: a fix every few minutes while you're on the move, and almost none while you stay put.</string>
+    <!-- Core Motion: walking, driving or still (Location.swift), so fixes are
+         only taken when they could say something new. -->
+    <key>NSMotionUsageDescription</key>
+    <string>Hearsay uses whether you're still, walking or driving to take location fixes only when you've moved, which saves battery.</string>
     <!-- Keeps the pendant connection, and recording, alive in the background;
          location lets readings continue there (allowsBackgroundLocationUpdates
          requires it). -->

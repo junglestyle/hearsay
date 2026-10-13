@@ -46,7 +46,8 @@ Secrets are kept in env files outside the repo.
 
 To update, run `git pull` on every host, then re-run `install/nas.sh` on the
 NAS, `install/gpu.sh` on the dev box, and `install/ios.sh` and
-`install/mac.sh` on the Mac. With a
+`install/mac.sh` on the Mac, in that order: the NAS must read a new kind of
+upload record before the phone or Mac sends it. With a
 free Apple ID the phone's install expires after 7 days; re-running
 `install/ios.sh` renews it.
 

@@ -2,8 +2,10 @@
 the places the operator has named.
 
 The iPhone app samples the owner's location while it records (LOCATION
-records, hearsay/capture.py): once when recording starts, then every 2 minutes,
-at about 100 m accuracy. Only named places reach the stream, never
+records, hearsay/capture.py): a precise fix when recording starts and about
+every 5 minutes on the move; staying put, it stops taking fixes and says every
+5 minutes that it's still at its anchor (MOVEMENT records), which count as
+readings too. Only named places reach the stream, never
 coordinates: a reading is at the nearest named place within RADIUS, and a
 reading near no named place says nothing. Names are the operator's durable
 input in labels/places.jsonl, matched by distance on every reprocess, so
@@ -30,8 +32,9 @@ from pathlib import Path
 # own accuracy.
 RADIUS = 100.0
 # The last reading this long before a conversation starts still says where it
-# began: the phone samples every 2 minutes, and may miss one.
-LOOKBACK = 240.0
+# began: the phone reads about every 5 minutes, a fix can take most of a
+# minute, and iOS doesn't keep exact time in the background.
+LOOKBACK = 420.0
 
 SCHEMA = """
 DROP TABLE IF EXISTS conversation_places;

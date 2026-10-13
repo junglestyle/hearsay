@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from hearsay.affect import SCHEMA as AFFECT_SCHEMA
 from hearsay.assemble import SCHEMA as ASSEMBLE_SCHEMA
 from hearsay.delivery import SCHEMA as DELIVERY_SCHEMA
-from hearsay.capture import LOCATION
+from hearsay.capture import ACTIVITY, LOCATION, MOVEMENT, ROUTE
 from hearsay.conversations import SCHEMA as CONVERSATIONS_SCHEMA
 from hearsay.parse import rebuild
 from hearsay.people import SCHEMA as PEOPLE_SCHEMA
@@ -57,3 +57,30 @@ def test_a_conversation_lists_the_named_places_it_happened_at(tmp_path):
     ]
     assert index["c2"]["places"] == []
     assert "26.1" not in (stream / "index.json").read_text()  # never coordinates
+
+
+def test_staying_put_keeps_the_place_without_fresh_fixes(tmp_path):
+    raw, db_path, labels, stream = tmp_path / "raw", tmp_path / "h.sqlite", tmp_path / "labels", tmp_path / "stream"
+    labels.mkdir()
+    t0 = T.timestamp()
+    anchor = struct.pack("<BBB", 2, 90, 0) + struct.pack("<ddf", *BAR, 100.0)  # stationary, 90%, heartbeat
+    readings = [fix(t0, *BAR, accuracy=12.0),
+                record(t0 + 5, ACTIVITY, struct.pack("<dBB", t0, 1, 2)),  # stationary, high confidence
+                record(t0 + 130, MOVEMENT, struct.pack("<BBB", 2, 90, 3) + struct.pack("<ddf", *BAR, 100.0)),  # settled
+                *[record(t0 + 130 + 300 * i, MOVEMENT, anchor) for i in range(1, 30)],
+                record(t0 + 9000, ROUTE, b"\x01" + "BluetoothA2DPOutput\tMy Car".encode()),
+                record(t0 + 9010, MOVEMENT, struct.pack("<BBB", 5, 40, 5))]  # driving, a guess from the car
+    upload(raw, T + timedelta(hours=3), "k-stay", b"".join(readings))
+    rebuild(raw, db_path)
+    db = sqlite3.connect(db_path)
+    db.executescript(ASSEMBLE_SCHEMA + CONVERSATIONS_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA + PEOPLE_SCHEMA + AFFECT_SCHEMA + DELIVERY_SCHEMA)
+    db.execute("INSERT INTO conversations VALUES ('c1', ?, ?, 600, 0)", (t0 + 7200, t0 + 7800))  # two hours in
+    db.commit()
+    db.close()
+    (labels / "places.jsonl").write_text(json.dumps({"type": "place", "name": "Chill", "latitude": BAR[0], "longitude": BAR[1]}) + "\n")
+
+    find_places(db_path, labels)
+    write_stream(db_path, stream)
+
+    [entry] = json.loads((stream / "index.json").read_text())["conversations"]
+    assert [p["name"] for p in entry["places"]] == ["Chill"]

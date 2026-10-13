@@ -60,7 +60,7 @@ struct HearsayApp: App {
         WindowGroup {
             TabView {
                 StatusView(pendant: recorder.pendant, pause: recorder.pause, buttons: recorder.buttons,
-                           uploader: recorder.uploader)
+                           uploader: recorder.uploader, location: recorder.location)
                     .tabItem { Label("Recorder", systemImage: "waveform") }
                 VoicesView()
                     .tabItem { Label("Voices", systemImage: "person.wave.2") }
@@ -74,6 +74,7 @@ struct StatusView: View {
     @ObservedObject var pause: Pause
     @ObservedObject var buttons: Buttons
     @ObservedObject var uploader: Uploader
+    @ObservedObject var location: Location
     @State private var url = Settings.urlText
     @State private var token = ""
     @State private var portal = Settings.portalText
@@ -147,6 +148,18 @@ struct StatusView: View {
                     } footer: {
                         Text("Tap to listen and keep a stretch. Swipe to upload or delete all of it.")
                     }
+                }
+
+                Section {
+                    LabeledContent("Now", value: location.state.label)
+                    LabeledContent("Car", value: Settings.carName.isEmpty ? "Not set" : Settings.carName)
+                    if let output = location.output, output != Settings.carName {
+                        Button("Use \u{201C}\(output)\u{201D} as my car") { location.useAsCar() }
+                    }
+                } header: {
+                    Text("Location")
+                } footer: {
+                    Text("While connected to your car's Bluetooth, tap to use it as your car. Connecting and disconnecting help tell when a trip starts and ends.")
                 }
 
                 Section("Pendant") {
@@ -241,5 +254,18 @@ struct StatusView: View {
         let size = ByteCountFormatter.string(fromByteCount: Int64(window.bytes), countStyle: .file)
         let expires = window.end.addingTimeInterval(Pause.retention).formatted(.dateTime.month(.abbreviated).day())
         return "\(length), \(size), deleted \(expires)"
+    }
+}
+
+extension Movement.State {
+    var label: String {
+        switch self {
+        case .off: "Not recording"
+        case .uncertain: "Unsure"
+        case .stationary: "Staying put"
+        case .walking: "Walking"
+        case .cycling: "Cycling"
+        case .driving: "Driving"
+        }
     }
 }

@@ -111,7 +111,8 @@ that sounds like the media the operator tagged offers `_media` for one tap
 (`hearsay/media.py`), never tagged on its own.
 
 Slice 13 (where a conversation happened) is done: the iPhone app samples the
-owner's location while recording (every 2 minutes, records in the capture
+owner's location while recording (precise fixes while moving, an anchor
+while staying put, `ios/Hearsay/Movement.swift`; records in the capture
 upload, `hearsay/capture.py`), and each conversation in the stream lists the
 places the operator named that it happened at (`hearsay/places.py`,
 labels/places.jsonl), never coordinates.

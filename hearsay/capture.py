@@ -10,7 +10,8 @@ sequence of records, little-endian:
 
     f64 at      unix seconds on the recorder's clock when it arrived (MIC,
                 SYSTEM: when the frame's audio began)
-    u8  kind    CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM or LOCATION
+    u8  kind    CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM,
+                LOCATION, ACTIVITY, ROUTE or MOVEMENT
     u16 length
     bytes       CONNECTED: the codec byte read on connect (19B10002); the
                 iPhone app also writes one on resuming from a pause, since
@@ -27,6 +28,20 @@ sequence of records, little-endian:
                 LOCATION: where the iPhone app was while recording, latitude
                 f64 and longitude f64 in degrees, then the accuracy iOS
                 reported f32 in metres (hearsay/places.py)
+                ACTIVITY: a Core Motion activity update, its start f64, flags
+                u8 (bit 0 stationary, 1 walking, 2 running, 3 cycling,
+                4 automotive, 5 unknown), confidence u8 (0 low to 2 high)
+                ROUTE: the phone's Bluetooth and car audio outputs changed:
+                car u8 (1 if one is the owner's car), then UTF-8 lines of
+                port type, tab, port name
+                MOVEMENT: the app's movement state (ios/Hearsay/Movement.swift):
+                state u8 (0 off, 1 uncertain, 2 stationary, 3 walking,
+                4 cycling, 5 driving), confidence u8 percent, reason u8
+                (0 heartbeat, 1 started, 2 stopped, 3 settled, 4 departed,
+                5 activity, 6 resumed), then while stationary the anchor:
+                latitude f64, longitude f64, radius f32 in metres. Written on
+                every change and every 5 minutes while stationary, when the
+                app takes no fixes
 
 An audio notification is [index u16 LE][sub u8][Opus bytes]. index counts
 notifications and wraps at 65535; sub 0 starts a frame, and a frame split
@@ -69,8 +84,10 @@ from pathlib import Path
 
 from hearsay.assemble import SAMPLE_RATE
 
-CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM, LOCATION = 1, 2, 3, 4, 5, 6, 7, 8
+CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM, LOCATION, ACTIVITY, ROUTE, MOVEMENT = range(1, 12)
 LOCATION_FIX = struct.Struct("<ddf")
+MOVEMENT_HEADER = struct.Struct("<BBB")
+STATIONARY = 2
 MAC_FRAME = struct.Struct("<H")
 RECORD_HEADER = struct.Struct("<dBH")
 STORED_HEADER = struct.Struct("<BQd")
@@ -126,7 +143,7 @@ def read_records(body: bytes) -> list[tuple[float, int, bytes]]:
             raise ValueError(f"truncated record header at byte {offset}")
         at, kind, length = RECORD_HEADER.unpack_from(body, offset)
         offset += RECORD_HEADER.size
-        if kind not in (CONNECTED, AUDIO, BUTTON, STORED, ACTION, MIC, SYSTEM, LOCATION):
+        if not CONNECTED <= kind <= MOVEMENT:
             raise ValueError(f"unknown record kind {kind} at byte {offset}")
         if offset + length > len(body):
             raise ValueError(f"truncated record at byte {offset}")
@@ -157,8 +174,19 @@ def marks(records: list[tuple[float, int, bytes]]) -> list[tuple[float, str]]:
 
 
 def locations(records: list[tuple[float, int, bytes]]) -> list[tuple[float, float, float, float]]:
-    """(at, latitude, longitude, accuracy in metres) for each location reading in one upload."""
-    return [(at, *LOCATION_FIX.unpack(data)) for at, kind, data in records if kind == LOCATION]
+    """(at, latitude, longitude, accuracy in metres) for each location reading in one upload.
+
+    A fix is a reading, and so is each MOVEMENT record of the owner staying
+    put, at its anchor with the anchor's radius as accuracy: settled, the app
+    takes no fixes, and these say where it still is.
+    """
+    found = []
+    for at, kind, data in records:
+        if kind == LOCATION:
+            found.append((at, *LOCATION_FIX.unpack(data)))
+        elif kind == MOVEMENT and data[0] == STATIONARY:
+            found.append((at, *LOCATION_FIX.unpack_from(data, MOVEMENT_HEADER.size)))
+    return found
 
 
 def frames(records: list[tuple[float, int, bytes]]) -> list[tuple[float, int, bytes | None]]:
