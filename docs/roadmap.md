@@ -118,7 +118,9 @@ Protocol details come from Omi's open-source firmware (MIT).
   upload; the rest of it is deleted.
 - Mute: the pendant's mic gain set to 0, which mutes it in hardware and
   holds out of range and across app crashes until unmuted (which restores
-  the previous level).
+  the previous level). While muted the app drops the pendant's audio, live
+  and stored, rather than upload silence; stored audio counts as muted if
+  the app was muted at any time while the pendant was away.
 - Optional conversation markers: start (keep what follows even if short,
   e.g. self-notes) and end (force a split).
 - Configurable actions for the pendant's single and double tap (the

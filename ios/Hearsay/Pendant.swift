@@ -34,6 +34,7 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     private static let rememberedKey = "pendantID"
     private static let mutedKey = "muted"
     private static let gainBeforeMuteKey = "micGainBeforeMute"
+    private static let unmutedAtKey = "unmutedAt"
     private static let defaultGain: UInt8 = 6
     private static let awaySinceKey = "awaySince"
 
@@ -63,6 +64,7 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     private var ledCharacteristic: CBCharacteristic?
     private var storageNotifying = false
     private var downloading = false
+    private var downloadMuted = false
     // The transfer in progress: the next packet's sequence number on the
     // pendant, the bytes of a packet not yet complete, and progress.
     private var storedSeq: UInt64 = 0
@@ -122,10 +124,21 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     /// Mute in hardware: mic gain 0, saved on the pendant, so it holds out of
     /// range and across app crashes until unmuted. Unmuting restores the
     /// level from before.
+    ///
+    /// While muted, the pendant's audio (silence, once it has the level) is
+    /// dropped rather than uploaded, live or stored. Stored audio counts as
+    /// muted if the app was muted at any time while the pendant was away, as
+    /// for pausing (Pause.beginDownload): a mute made out of range only
+    /// reaches the pendant on reconnect, so what it stored until then is real.
     func setMuted(_ on: Bool) {
         muted = on
         UserDefaults.standard.set(on, forKey: Self.mutedKey)
         log.info("\(on ? "muting" : "unmuting")")
+        if !on {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.unmutedAtKey)
+            // The packet index jumped over what was dropped: restart its count, as route(to:) does.
+            if let codec { spool?.append(kind: Spool.connected, data: codec) }
+        }
         // Reconciled against the pendant's level once it's read.
         if let gain, let peripheral, peripheral.state == .connected {
             peripheral.readValue(for: gain)
@@ -285,7 +298,7 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
         guard let value = characteristic.value else { return }
         switch characteristic.uuid {
         case Self.audioData:
-            spool?.append(kind: Spool.audio, data: value)
+            if !muted { spool?.append(kind: Spool.audio, data: value) }
             count(value)
         case Self.buttonEvent:
             spool?.append(kind: Spool.button, data: value)
@@ -409,6 +422,9 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
             storedBuffer = Data()
             storedReceived = 0
             pause?.beginDownload(awaySince: awaySince)
+            let unmutedAt = UserDefaults.standard.object(forKey: Self.unmutedAtKey) as? Double
+            downloadMuted = muted || (awaySince.map { (unmutedAt ?? 0) >= $0.timeIntervalSince1970 } ?? false)
+            if downloadMuted { log.info("muted while the pendant was away: its stored audio is dropped") }
             stored = "downloading \(storedTotal) stored packets"
         case 0x03:  // data: the next bytes of the packet stream, cut anywhere
             storedBuffer.append(value.dropFirst())
@@ -445,7 +461,7 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
             withUnsafeBytes(of: storedSeq.littleEndian) { record.append(contentsOf: $0) }
             withUnsafeBytes(of: away.bitPattern.littleEndian) { record.append(contentsOf: $0) }
             record.append(storedBuffer.prefix(Self.storedPacketBytes))
-            pause?.storedTarget?.append(kind: Spool.stored, data: record)
+            if !(muted || downloadMuted) { pause?.storedTarget?.append(kind: Spool.stored, data: record) }
             storedBuffer = Data(storedBuffer.dropFirst(Self.storedPacketBytes))
             storedSeq += 1
             storedReceived += 1
@@ -457,6 +473,7 @@ final class Pendant: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     private func endDownload() {
         if downloading { pause?.endDownload() }
         downloading = false
+        downloadMuted = false
         storedBuffer = Data()
     }
 

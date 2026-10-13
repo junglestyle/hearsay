@@ -59,13 +59,21 @@ final class WindowAudio {
     /// The records from `from` to `to` (positions in the decoded audio), as
     /// uploads. Each starts with a CONNECTED record carrying the codec, as
     /// the NAS needs to decode it and to restart its count of the pendant's
-    /// packet index.
+    /// packet index. The window's last location and movement records from
+    /// before the stretch go too: staying put, the phone reads every 5
+    /// minutes, so a short stretch may hold none of its own, and the NAS takes
+    /// where it began from the last reading before it (hearsay/places.py).
     func cropped(from: Double, to: Double) -> [Data] {
         let start = wallTime(from).timeIntervalSince1970, end = wallTime(to).timeIntervalSince1970
         var uploads: [Data] = []
         var current = Data()
         var codec: UInt8?
+        var before: [UInt8: Spool.Record] = [:]
         for record in records {
+            if [Spool.location, Spool.movement].contains(record.kind) && record.at < start {
+                before[record.kind] = record
+                continue
+            }
             switch record.kind {
             case Spool.connected:
                 codec = record.data.first
@@ -87,6 +95,9 @@ final class WindowAudio {
             }
             if current.isEmpty, let codec {
                 current = Spool.Record(at: record.at, kind: Spool.connected, data: Data([codec])).encoded
+                if uploads.isEmpty {
+                    for kind in [Spool.location, Spool.movement] { if let place = before[kind] { current.append(place.encoded) } }
+                }
             }
             current.append(encoded)
         }

@@ -79,7 +79,8 @@ pendant's clock. Pause keeps audio from reaching the NAS (dropped, or kept on
 the phone for 30 days, where a paused stretch can be played, cropped to one
 selection and uploaded, or deleted); if the app was paused at any time
 while the pendant was away, everything it stored then counts as paused. Mute
-turns the pendant's mic off in hardware.
+turns the pendant's mic off in hardware, and the app uploads none of its
+audio while muted (nor what it stored while away, if muted then).
 
 The pendant's single and double tap are set in the app (Pendant button): mark
 to keep the conversation around the tap, from 30 s before it to 30 s after
