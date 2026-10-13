@@ -312,6 +312,15 @@ name lists the conversations recorded there (up to 10, latest first: when,
 the named people heard, and the first two turns' words, from /places.json),
 to tell from what was said where it is; still no audio in the app.
 
+Wrong readings, corrected by time (2026-10-13), since a wrong fix can sit
+inside a real place's circle now or once it grows: labels/places.jsonl
+takes {"type": "drop", start, end} (those readings count for no place) and
+{"type": "at", start, end, name} (they were at that place wherever they
+say), applied on every reprocess, raw untouched. Fixes iOS reports as
+worse than 300 m are left out too (a stay's readings carry its anchor's
+radius, at most 300). The app offers both on each conversation it lists
+for a place or a spot.
+
 ## 14. Place as a hint for who is speaking
 
 People are tied to places (the bartender at the Chill Room, a coworker at

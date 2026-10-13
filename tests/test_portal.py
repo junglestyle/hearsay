@@ -258,6 +258,12 @@ def test_a_spot_where_the_owner_spent_time_can_be_named(portal):
     client.post("/places", headers=app, data={"action": "move", "from": "Chill Room", "at": "26.12,-80.14"})
     assert read_places(labels_dir) == [("Chill Room", 26.12, -80.14, 400.0)]
 
+    # Its conversations, each with the span of readings that put it there; dropping that span takes it off.
+    [visit] = client.get("/places.json", headers=app).json()["visits"]["Chill Room"]
+    assert visit["readings"] == [1_767_225_590, 1_767_225_830]
+    client.post("/places", headers=app, data={"action": "drop", "start": "1767225590", "end": "1767225830"})
+    assert client.get("/places.json", headers=app).json()["visits"] == {}
+
 
 def test_people_heard_at_a_cluster_s_place_are_offered_for_one_tap(portal):
     client, db_path, labels_dir = portal

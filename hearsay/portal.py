@@ -37,7 +37,17 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from hearsay.media import HINT as MEDIA_HINT
 from hearsay.people import cluster_name
-from hearsay.places import LOOKBACK, MAX_RADIUS, MIN_RADIUS, RADIUS, read_ignored, read_places, unnamed_spots
+from hearsay.places import (
+    LOOKBACK,
+    MAX_RADIUS,
+    MIN_RADIUS,
+    RADIUS,
+    read_ignored,
+    read_places,
+    read_readings,
+    unnamed_spots,
+    visits,
+)
 from hearsay.turns import read_operator_files, resolve, wall
 
 COOKIE = "hearsay_session"
@@ -57,6 +67,8 @@ PLACE_CLIPS = 3
 # For the app's Places map: an unnamed spot's latest conversations, each with
 # its first turns cut short, to tell by what was said where it is.
 SPOT_CONVERSATIONS = 10
+# And a named place's, to correct one that was put there wrongly.
+PLACE_CONVERSATIONS = 20
 OPENING_TURNS = 2
 OPENING_CHARACTERS = 200
 
@@ -667,7 +679,7 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
         ignored = read_ignored(labels_dir)
         db = connect()
         try:
-            readings = db.execute("SELECT at, latitude, longitude FROM locations ORDER BY at").fetchall()
+            readings = read_readings(db, labels_dir, spots)
             conversations = db.execute("SELECT conversation_id, start, end FROM conversations").fetchall()
             turns = [(turn_id, cid, datetime.fromisoformat(zero_at).timestamp() + start, end - start)
                      for turn_id, cid, zero_at, start, end in db.execute(
@@ -694,9 +706,9 @@ Open a cluster to hear it, rename just that cluster, or forget its name.</p>
                       f"<form class='clip' method='post' action='/places'><input type='hidden' name='from' value='{html.escape(name)}'>"
                       "<input name='at' placeholder='Coordinates or a Maps link' autocomplete='off' required>"
                       "<button type='submit' name='action' value='move'>Move here</button></form></li>")
-        reading_times = [at for at, _, _ in readings]
+        reading_times = [at for at, _, _, _ in readings]
         unnamed = ""
-        for spot in unnamed_spots(readings, spots, ignored):
+        for spot in unnamed_spots([r[:3] for r in readings if r[3] is None], spots, ignored):
             times = spot["times"]
             days = sorted({datetime.fromtimestamp(at, timezone.utc).strftime("%b %-d") for at in times})
             people = sorted({p for cid, start, end in conversations if any(start <= at <= end for at in times)
@@ -738,7 +750,7 @@ exactly where it is, find it in Maps, drop a pin, copy its coordinates, and past
         spots = read_places(labels_dir)
         db = connect()
         try:
-            readings = db.execute("SELECT at, latitude, longitude FROM locations ORDER BY at").fetchall()
+            readings = read_readings(db, labels_dir, spots)
             conversations = db.execute("SELECT conversation_id, start, end FROM conversations ORDER BY start DESC").fetchall()
             heard = heard_by_conversation(db)
             opening = {}
@@ -749,18 +761,35 @@ exactly where it is, find it in Maps, drop a pin, copy its coordinates, and past
         finally:
             db.close()
 
+        def entry(cid: str, start: float, end: float, at: list[float]) -> dict:
+            # When, who and how it began, to tell from what was said where it was;
+            # "readings" is the span of the readings that put it there, to correct.
+            return {"start": start, "end": end, "people": sorted(heard.get(cid, ())),
+                    "opening": opening.get(cid, "")[:OPENING_CHARACTERS], "readings": [min(at), max(at)]}
+
         def at_spot(times: list[float]) -> list[dict]:
-            # Conversations recorded while the phone was there, latest first: to
-            # tell from what was said, and who, where an unnamed spot is.
-            found = [{"start": start, "end": end, "people": sorted(heard.get(cid, ())),
-                      "opening": opening.get(cid, "")[:OPENING_CHARACTERS]}
-                     for cid, start, end in conversations if any(start <= at <= end for at in times)]
+            found = []
+            for cid, start, end in conversations:
+                at = [t for t in times if start <= t <= end]
+                if at:
+                    found.append(entry(cid, start, end, at))
             return found[:SPOT_CONVERSATIONS]
 
-        unnamed = unnamed_spots(readings, spots, read_ignored(labels_dir))
+        # Each named place's conversations, latest first, as reprocess will
+        # find them with the corrections so far.
+        times, names = [r[0] for r in readings], [r[3] for r in readings]
+        visited = {}
+        for cid, start, end in conversations:
+            for place in {place for place, _, _ in visits(times, names, start, end)}:
+                at = [t for t, name in zip(times, names) if name == place and start - LOOKBACK <= t <= end]
+                if at and len(visited.setdefault(place, [])) < PLACE_CONVERSATIONS:
+                    visited[place].append(entry(cid, start, end, at))
+
+        unnamed = unnamed_spots([r[:3] for r in readings if r[3] is None], spots, read_ignored(labels_dir))
         return JSONResponse({
             "named": [{"name": name, "latitude": lat, "longitude": lon, "radius": radius}
                       for name, lat, lon, radius in spots],
+            "visits": visited,
             "unnamed": [{"latitude": s["latitude"], "longitude": s["longitude"], "minutes": len(s["times"]),
                          "conversations": at_spot(s["times"])} for s in unnamed]})
 
@@ -797,6 +826,10 @@ exactly where it is, find it in Maps, drop a pin, copy its coordinates, and past
                         "longitude": float(field("longitude"))}, places_path)
         elif action == "forget" and field("from"):
             append_tag({"type": "forget", "name": field("from")}, places_path)
+        elif action in ("drop", "at") and field("start") and field("end") and (action == "drop" or name):
+            # A span of readings that was wrong, or was really at a named place (hearsay/places.py).
+            append_tag({"type": action, "start": float(field("start")), "end": float(field("end"))}
+                       | ({"name": name} if action == "at" else {}), places_path)
         elif action == "move" and field("from"):
             # Its spots, where the phone's readings put them, give way to the points given:
             # one pasted here, or from the app's map each of the place's spots, one dragged

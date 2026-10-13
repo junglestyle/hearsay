@@ -105,3 +105,39 @@ def test_a_place_with_a_wider_area_takes_readings_further_out(tmp_path):
 
     assert places_with(None) == 0
     assert places_with(400) == 1
+
+
+def test_wrong_readings_are_corrected_by_time_and_stay_corrected(tmp_path):
+    raw, db_path, labels = tmp_path / "raw", tmp_path / "h.sqlite", tmp_path / "labels"
+    labels.mkdir()
+    t0 = T.timestamp()
+    # At home all along, but one fix bounced to the bar, one was too vague to
+    # say anything, and one indoors landed 300 m off.
+    readings = [fix(t0 - 60, *HOME), fix(t0 + 300, *BAR), fix(t0 + 400, *BAR, accuracy=900),
+                fix(t0 + 600, HOME[0] + 0.0027, HOME[1])]
+    upload(raw, T + timedelta(minutes=20), "k-wrong", b"".join(readings))
+    rebuild(raw, db_path)
+    db = sqlite3.connect(db_path)
+    db.executescript(CONVERSATIONS_SCHEMA)
+    db.execute("INSERT INTO conversations VALUES ('c1', ?, ?, 600, 0)", (t0, t0 + 900))
+    db.commit()
+    db.close()
+    named = [{"type": "place", "name": "Bar", "latitude": BAR[0], "longitude": BAR[1]},
+             {"type": "place", "name": "Hom", "latitude": HOME[0], "longitude": HOME[1]}]
+
+    def places(*records):
+        (labels / "places.jsonl").write_text("".join(json.dumps(r) + "\n" for r in [*named, *records]))
+        find_places(db_path, labels)
+        db = sqlite3.connect(db_path)
+        found = [p for (p,) in db.execute("SELECT place FROM conversation_places ORDER BY start")]
+        db.close()
+        return found
+
+    assert places() == ["Hom", "Bar"]  # the bounce; the vague one and the far one say nothing
+    corrections = [{"type": "drop", "start": t0 + 300, "end": t0 + 300},
+                   {"type": "at", "start": t0 + 600, "end": t0 + 600, "name": "Hom"}]
+    assert places(*corrections) == ["Hom"]
+    # A wider bar doesn't take the dropped reading back, and a rename carries the move.
+    wider = {**named[0], "radius": 2000}
+    named[0] = wider
+    assert places(*corrections, {"type": "rename", "from": "Hom", "to": "Home"}) == ["Home"]

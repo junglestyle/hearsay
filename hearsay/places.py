@@ -22,6 +22,12 @@ labels/places.jsonl, one record per line:
         are no longer offered for naming (a road, a friend's street). Never
         reaches the stream, which only names named places.
     {"type": "unignore", "latitude", "longitude"}  offered again
+    {"type": "drop", "start", "end"}  the readings in that span (unix seconds)
+        were wrong: they count for no place, now or once circles change
+    {"type": "at", "start", "end", "name"}  the readings in that span were at
+        that place, wherever they say (a fix that wandered); later wins
+
+Fixes iOS was less sure of than MAX_ACCURACY are left out too.
 """
 
 import bisect
@@ -35,6 +41,9 @@ from pathlib import Path
 RADIUS = 100.0
 # The radii the operator can set: about a shop to a festival ground.
 MIN_RADIUS, MAX_RADIUS = 25.0, 2000.0
+# Readings less accurate than this (metres, as iOS reports it) say too little
+# to place anyone. A stay's readings carry its anchor's radius, at most 300.
+MAX_ACCURACY = 300.0
 # The last reading this long before a conversation starts still says where it
 # began: the phone reads about every 5 minutes, a fix can take most of a
 # minute, and iOS doesn't keep exact time in the background.
@@ -87,6 +96,39 @@ def read_ignored(labels_dir: Path) -> list[tuple[float, float]]:
     return ignored
 
 
+def read_corrections(labels_dir: Path) -> list[tuple[float, float, str | None]]:
+    """(start, end, place) for each span of readings the operator corrected,
+    in order: None where they were wrong, a name where they were at it.
+    Renames carry over; a forgotten place's spans become wrong ones."""
+    path = labels_dir / "places.jsonl"
+    found = []
+    for line in (path.read_text().splitlines() if path.exists() else []):
+        record = json.loads(line)
+        if record["type"] in ("drop", "at"):
+            found.append((record["start"], record["end"], record.get("name")))
+        elif record["type"] == "rename":
+            found = [(a, b, record["to"] if n == record["from"] else n) for a, b, n in found]
+        elif record["type"] == "forget":
+            found = [(a, b, None if n == record["name"] else n) for a, b, n in found]
+    return found
+
+
+def read_readings(db: sqlite3.Connection, labels_dir: Path,
+                  spots: list[tuple[str, float, float, float]]) -> list[tuple[float, float, float, str | None]]:
+    """(at, latitude, longitude, place) for each reading that counts, in time
+    order: the nearest named spot's place, or the operator's correction."""
+    corrections = read_corrections(labels_dir)
+    found = []
+    for at, lat, lon, accuracy in db.execute("SELECT at, latitude, longitude, accuracy FROM locations ORDER BY at"):
+        if accuracy > MAX_ACCURACY:
+            continue
+        said = [name for start, end, name in corrections if start <= at <= end]
+        if said and said[-1] is None:
+            continue
+        found.append((at, lat, lon, said[-1] if said else nearest(lat, lon, spots)))
+    return found
+
+
 def nearest(latitude: float, longitude: float, spots: list[tuple[str, float, float, float]]) -> str | None:
     found = [(metres(latitude, longitude, lat, lon), radius, name) for name, lat, lon, radius in spots]
     found = [(distance, name) for distance, radius, name in found if distance <= radius]
@@ -118,9 +160,9 @@ def find_places(db_path: Path, labels_dir: Path) -> dict:
     spots = read_places(labels_dir)
     db = sqlite3.connect(db_path)
     try:
-        readings = db.execute("SELECT at, latitude, longitude FROM locations ORDER BY at").fetchall()
-        times = [at for at, _, _ in readings]
-        names = [nearest(lat, lon, spots) for _, lat, lon in readings]
+        readings = read_readings(db, labels_dir, spots)
+        times = [at for at, _, _, _ in readings]
+        names = [place for _, _, _, place in readings]
         rows = []
         for conversation_id, start, end in db.execute("SELECT conversation_id, start, end FROM conversations"):
             rows += [(conversation_id, *visit) for visit in visits(times, names, start, end)]
