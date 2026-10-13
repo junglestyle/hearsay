@@ -51,7 +51,7 @@ struct SettingsView: View {
             } header: {
                 Text("Pausing")
             } footer: {
-                Text("Kept audio stays on this phone for 30 days, for you to review. Otherwise paused audio is dropped as it arrives.")
+                Text("Kept audio stays on this phone for 30 days, for you to review, with where you were; neither reaches Hearsay unless you upload it. Otherwise paused audio is dropped as it arrives.")
             }
 
             Section {

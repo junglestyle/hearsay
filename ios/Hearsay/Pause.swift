@@ -8,8 +8,10 @@ import Foundation
 ///
 /// A window is its own Spool under paused/<start millis>/, so its files are
 /// already uploads: keeping one moves them into the upload spool, and the NAS
-/// places them by their own times. Windows not kept are deleted `retention`
-/// after they end.
+/// places them by their own times. Where the owner was goes in the window too
+/// (Location), so a stretch uploaded later still gets its places, and nothing
+/// from a pause reaches the NAS unless uploaded. Windows not kept are deleted
+/// `retention` after they end.
 ///
 /// Audio the pendant stored while away is downloaded on reconnect. If the
 /// app was paused at any time while the pendant was away, all of it is

@@ -281,7 +281,9 @@ and the NAS reads that as a reading. Activity, route changes and every
 state, with its confidence and reason, are records in the upload, so trips
 can be reconstructed from raw later. AirTags were left out: Find My has no
 public API. The state machine is ios/Hearsay/Movement.swift, tested on its
-own (`swift test` in ios/).
+own (`swift test` in ios/). Paused with paused audio kept on the phone, it
+keeps tracking into the paused window, so its records reach the NAS only
+with the stretches the owner uploads.
 
 Next, in the app: a Places map (Apple's MapKit, so places go to no one new)
 where the owner drags a pin to where a place really is. The portal serves it

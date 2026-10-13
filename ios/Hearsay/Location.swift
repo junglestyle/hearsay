@@ -5,10 +5,13 @@ import Foundation
 
 /// Where the owner is while recording, for hearsay/places.py, spending as
 /// little battery as it can: Movement decides when a fix is worth it, and this
-/// carries that out and records what it saw. Only while recording (neither
-/// paused nor muted); everything stops on a pause.
+/// carries that out and records what it saw. Only while audio is being kept:
+/// recording, or paused with paused audio kept on the phone, when the records
+/// go into the paused window with its audio, so they reach the NAS only if
+/// the owner uploads that stretch and are deleted with the rest. Everything
+/// stops while muted, or paused with nothing kept.
 ///
-/// Records in the spool, all raw observations kept on the NAS:
+/// Records, all raw observations kept on the NAS:
 /// - LOCATION: each fix (Spool.location).
 /// - ACTIVITY: each Core Motion activity update (Spool.activity). The motion
 ///   coprocessor classifies on its own, so this costs next to nothing.
@@ -36,7 +39,9 @@ final class Location: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var output: String?
     @Published private(set) var state = Movement.State.off
 
-    private let spool: Spool
+    /// Where records go right now: the upload spool, a paused window, or
+    /// nowhere (nil), asked at each write so a pause takes effect at once.
+    private let target: () -> Spool?
     private let manager = CLLocationManager()
     private let motion = CMMotionActivityManager()
     private var movement = Movement()
@@ -45,8 +50,8 @@ final class Location: NSObject, ObservableObject, CLLocationManagerDelegate {
     private var session: (started: Date, precise: Bool, best: CLLocation?)?
     private var lastRoute: String?
 
-    init(spool: Spool) {
-        self.spool = spool
+    init(target: @escaping () -> Spool?) {
+        self.target = target
         super.init()
         manager.delegate = self
         // The app records in the background (the pendant keeps it running),
@@ -67,8 +72,9 @@ final class Location: NSObject, ObservableObject, CLLocationManagerDelegate {
         routeChanged()
     }
 
-    /// Called every second with whether the app is recording right now.
-    func tick(recording now: Bool) {
+    /// Called every second.
+    func tick() {
+        let now = target() != nil
         let at = Date().timeIntervalSince1970
         if now != recording {
             recording = now
@@ -148,7 +154,7 @@ final class Location: NSObject, ObservableObject, CLLocationManagerDelegate {
         withUnsafeBytes(of: best.coordinate.latitude.bitPattern.littleEndian) { data.append(contentsOf: $0) }
         withUnsafeBytes(of: best.coordinate.longitude.bitPattern.littleEndian) { data.append(contentsOf: $0) }
         withUnsafeBytes(of: Float(best.horizontalAccuracy).bitPattern.littleEndian) { data.append(contentsOf: $0) }
-        spool.append(kind: Spool.location, data: data)
+        target()?.append(kind: Spool.location, data: data)
         apply(movement.fix(Movement.Fix(at: best.timestamp.timeIntervalSince1970, latitude: best.coordinate.latitude,
                                         longitude: best.coordinate.longitude, accuracy: best.horizontalAccuracy)))
     }
@@ -187,7 +193,7 @@ final class Location: NSObject, ObservableObject, CLLocationManagerDelegate {
         let described = bluetooth.map { "\($0.portType.rawValue)\t\($0.portName)" }.joined(separator: "\n")
         guard recording, described + "\(car)" != lastRoute else { return }
         lastRoute = described + "\(car)"
-        spool.append(kind: Spool.route, data: Data([car ? 1 : 0]) + Data(described.utf8))
+        target()?.append(kind: Spool.route, data: Data([car ? 1 : 0]) + Data(described.utf8))
         apply(movement.car(connected: car, at: Date().timeIntervalSince1970))
     }
 
@@ -203,7 +209,7 @@ final class Location: NSObject, ObservableObject, CLLocationManagerDelegate {
         withUnsafeBytes(of: activity.startDate.timeIntervalSince1970.bitPattern.littleEndian) { data.append(contentsOf: $0) }
         data.append(flags)
         data.append(UInt8(activity.confidence.rawValue))
-        spool.append(kind: Spool.activity, data: data)
+        target()?.append(kind: Spool.activity, data: data)
     }
 
     private func record(_ state: Movement.State, confidence: Double, reason: Movement.Reason, anchor: Movement.Anchor?) {
@@ -213,7 +219,7 @@ final class Location: NSObject, ObservableObject, CLLocationManagerDelegate {
             withUnsafeBytes(of: anchor.longitude.bitPattern.littleEndian) { data.append(contentsOf: $0) }
             withUnsafeBytes(of: Float(anchor.radius).bitPattern.littleEndian) { data.append(contentsOf: $0) }
         }
-        spool.append(kind: Spool.movement, data: data)
+        target()?.append(kind: Spool.movement, data: data)
     }
 
     /// Driving wins over the rest, as Core Motion can say several at once

@@ -31,7 +31,9 @@ final class Recorder {
         pause = Pause(root: support.appendingPathComponent("paused"), spool: spool, pendant: pendant)
         buttons = Buttons(pendant: pendant, pause: pause)
         uploader = Uploader(spool: spool)
-        location = Location(spool: spool)
+        location = Location { [spool, pause, pendant] in
+            pendant.muted ? nil : pause.paused ? pause.window : spool
+        }
 
         // Uploads cover a minute each; the NAS reprocesses hourly, so there's
         // no point in smaller ones. Timers only fire while the app runs,
@@ -39,7 +41,7 @@ final class Recorder {
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [spool, pause, pendant, location] _ in
             spool.sync()
             pause.window?.sync()
-            location.tick(recording: !pause.paused && !pendant.muted)
+            location.tick()
         }
         Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [spool, pendant, pause] _ in
             spool.seal()
