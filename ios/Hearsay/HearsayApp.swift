@@ -151,7 +151,7 @@ struct StatusView: View {
                     }
                 }
             }
-            .navigationTitle("Hearsay")
+            .navigationTitle(headline)
             .toolbar {
                 NavigationLink {
                     SettingsView(pendant: pendant, pause: pause, buttons: buttons,
@@ -166,22 +166,16 @@ struct StatusView: View {
     private var connected: Bool { pendant.state == "connected" }
     private var live: Bool { connected && !pause.paused && !pendant.muted }
 
-    /// What's happening, in one line, then the pendant's own state.
+    /// The pendant's own state, under the title that says what's happening.
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: "circle.fill")
                 .font(.caption)
                 .foregroundStyle(live ? Color.live : Color.secondary.opacity(0.5))
                 .symbolEffect(.pulse, isActive: live)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(headline)
-                    .font(.title2.weight(.semibold))
-                    .contentTransition(.opacity)
-                Text(connected ? "Pendant connected" : pendant.state.prefix(1).uppercased() + pendant.state.dropFirst())
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            Text(connected ? "Pendant connected" : pendant.state.prefix(1).uppercased() + pendant.state.dropFirst())
+                .foregroundStyle(.secondary)
             Spacer()
             if let battery = pendant.battery {
                 Label("\(battery)%", systemImage: batterySymbol(battery))
@@ -190,15 +184,13 @@ struct StatusView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
-        .animation(.snappy, value: headline)
         .accessibilityElement(children: .combine)
     }
 
     private var headline: String {
         if pause.paused { return "Paused" }
         if pendant.muted { return "Muted" }
-        return connected ? "Recording" : "Not connected"
+        return connected ? "Recording" : "Pendant disconnected"
     }
 
     /// Filled while its state is on, so the button shows the state too.
