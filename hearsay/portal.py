@@ -275,12 +275,25 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
             db.close()
         return places, people
 
-    def hints(turns: list[dict], person: str | None) -> tuple[list[str], list[str], bool]:
-        """What a cluster's page offers for one tap: its places and the people
-        heard there, and whether it sounds like tagged media (unnamed only)."""
+    def hints(turns: list[dict], person: str | None) -> tuple[list[str], dict[str, list[str]]]:
+        """What a cluster's page offers for one tap: the named people it sounds
+        most like and those heard at its places (with the places), and _media
+        when it sounds like tagged media. Voice and media for unnamed clusters only."""
         places, people = heard_at_places({s["conversation_id"] for s in turns})
         score = media_score([s["turn_id"] for s in turns]) if not person else None
-        return places, people, score is not None and score >= MEDIA_HINT
+        return places, {"voice": [] if person else closest_voices(turns[0]["cluster"]), "place": people,
+                        "media": ["_media"] if score is not None and score >= MEDIA_HINT else []}
+
+    def closest_voices(cluster_id: str) -> list[str]:
+        """Named people this cluster sounds most like, though not enough to join (hearsay/people.py)."""
+        db = connect()
+        try:
+            return [p for (p,) in db.execute(
+                "SELECT person FROM cluster_voices WHERE cluster = ? ORDER BY similarity DESC", (cluster_id,))]
+        except sqlite3.OperationalError:
+            return []  # a database from before cluster_voices, until the next reprocess
+        finally:
+            db.close()
 
     def media_score(turn_ids: list[str]) -> float | None:
         """How much a cluster sounds like the media the operator has tagged (hearsay/media.py)."""
@@ -450,12 +463,18 @@ def create_app(db_path: Path, audio_dir: Path, labels_dir: Path, user: str, pass
         if odd:
             odd = ("<h2>Tagged differently</h2><p class='muted'>Earlier tags here say someone else."
                    " Tag each clip for what it is.</p>" + odd)
-        places, suggested, media = hints(turns, person)
+        places, offered = hints(turns, person)
+        suggested = offered["voice"] + [p for p in offered["place"] if p not in offered["voice"]]
+        media = bool(offered["media"])
         hint = ""
-        if suggested:
-            hint = (f"<p class='muted'>Heard at {html.escape(', '.join(places))}:</p>" + "".join(
+        if offered["voice"]:
+            hint += "<p class='muted'>Sounds most like:</p>" + "".join(
+                f"<button type='submit' name='voice' value='{html.escape(p)}' formnovalidate>{html.escape(p)}</button>"
+                for p in offered["voice"])
+        if offered["place"]:
+            hint += f"<p class='muted'>Heard at {html.escape(', '.join(places))}:</p>" + "".join(
                 f"<button type='submit' name='suggested' value='{html.escape(p)}' formnovalidate>{html.escape(p)}</button>"
-                for p in suggested))
+                for p in offered["place"])
         others = sorted(n for n in set(names.values()) | set(clips.values()) if not n.startswith("_"))
         known = "".join(f"<option value='{html.escape(n)}'>" for n in suggested + [n for n in others if n not in suggested])
         forget = ("<button type='submit' name='action' value='forget' formnovalidate>Forget this name</button>"
@@ -520,8 +539,11 @@ A clip that isn't this speaker (a cough, a video, someone else) can be tagged on
         # _media when it sounds like tagged media): marked with which hint, so
         # how often each is taken can be counted.
         suggested = " ".join(form.get("suggested", [""])[0].split())
+        voice = " ".join(form.get("voice", [""])[0].split())
         category = form.get("category", [""])[0]
-        if suggested:
+        if voice:
+            action, name = "name", voice
+        elif suggested:
             action, name = "name", suggested
         elif category in CATEGORIES:
             action, name = "name", category
@@ -550,11 +572,10 @@ A clip that isn't this speaker (a cough, a video, someone else) can be tagged on
                 chosen = turns
             # What the page offered, so hearsay/hints.py can tell a hint
             # passed over from one never offered.
-            _, people, media = hints(turns, name_of(turns, names)[0])
+            _, offered = hints(turns, name_of(turns, names)[0])
             # The Media button stands out when the media hint offers it: taking it then is taking the hint.
-            via = "place" if suggested else "media" if category == "_media" and media else None
-            append_tag({"type": "name", **spans(chosen), "name": name if action == "name" else None,
-                        "offered": people + (["_media"] if media else [])}
+            via = "voice" if voice else "place" if suggested else "media" if category == "_media" and offered["media"] else None
+            append_tag({"type": "name", **spans(chosen), "name": name if action == "name" else None, "offered": offered}
                        | ({"via": via} if via else {}))
         else:
             return RedirectResponse(f"/cluster/{quote(cluster_id)}", status_code=303)

@@ -328,6 +328,15 @@ turns), and the median seconds per naming. First reading, 2026-10-13: of 9
 people named since the hint, 5 were taken from it (1 later retagged
 `_media`), and neither of 2 `_media` namings came from the media hint.
 
+Voice joined place as a hint on 2026-10-13: an unnamed cluster offers the
+named people it sounds most like though not enough to join (up to three,
+average similarity 0.20 or more, computed on reprocess into cluster_voices).
+Checked first, leaving out each speaker the operator named: of the 16 under
+the 0.40 threshold to their own person, the right person came first for 9
+and in the top three for 14. Taken as `"via": "voice"`, counted by
+hearsay/hints.py like the others; its undo rate is the guard against a tap
+merging two people.
+
 ## 15. Media hint
 
 TV and video dialogue is a large share of other voices (on 2026-10-07, 85 of

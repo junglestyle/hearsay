@@ -131,3 +131,41 @@ def test_nothing_to_cluster(tmp_path):
     db.commit()
     db.close()
     assert group_people(db_path) == {"turns": 0, "clusters": 0, "named_clusters": 0, "people": 0, "conflicts": 0}
+
+
+def test_an_unnamed_cluster_offers_the_named_people_it_sounds_most_like(tmp_path):
+    rng = random.Random(1)
+    sam, zed, other = (unit([rng.gauss(0, 1) for _ in range(192)]) for _ in range(3))
+    # Like Sam, but not enough to join him (about 0.3 once each turn's noise is in): a cold, a bad room.
+    kin = unit([0.4 * a + 0.92 * b for a, b in zip(sam, other)])
+    turns = [(f"s{i}", "c1", sam) for i in range(3)] + [(f"z{i}", "c2", zed) for i in range(3)]
+    turns += [(f"k{i}", "c3", kin) for i in range(3)]
+
+    db_path, labels_dir = tmp_path / "h.sqlite", tmp_path / "labels"
+    labels_dir.mkdir()
+    db = sqlite3.connect(db_path)
+    db.executescript(PARSE_SCHEMA + ASSEMBLE_SCHEMA + TURNS_SCHEMA + SPEAKERS_SCHEMA)
+    for conversation in ("c1", "c2", "c3"):
+        db.execute("INSERT INTO conversation_audio VALUES (?, ?, 600, 1, NULL, NULL)", (conversation, ZERO_AT))
+    for idx, (turn_id, conversation, voice) in enumerate(turns):
+        embedding = array("f", unit([x + rng.gauss(0, 0.04) for x in voice])).tobytes()
+        db.execute("INSERT INTO turns VALUES (?,?,?,?,?,?,?,?)",
+                   (turn_id, conversation, idx, 5.0 * idx, 5.0 * idx + 4, "synthetic", None, None))
+        db.execute("INSERT INTO turn_speakers VALUES (?,?,?,?,?,?,?)",
+                   (turn_id, conversation, 1.0, embedding, 0.0, "not_owner", "voice"))
+    db.commit()
+    db.close()
+    tags = [{"type": "name", "at": at(0.0), "name": "Sam"}, {"type": "name", "at": at(15.0), "name": "Zed"}]
+    (labels_dir / "tags.jsonl").write_text("".join(json.dumps(t) + "\n" for t in tags))
+
+    record_operator_input(db_path, labels_dir)
+    group_people(db_path)
+    db = sqlite3.connect(db_path)
+    kin_cluster, kin_person = db.execute("SELECT cluster, person FROM turn_people WHERE turn_id = 'k0'").fetchone()
+    offered = db.execute("SELECT person, similarity FROM cluster_voices WHERE cluster = ?", (kin_cluster,)).fetchall()
+    named = db.execute("SELECT count(*) FROM cluster_voices WHERE cluster IN"
+                       " (SELECT cluster FROM turn_people WHERE person IS NOT NULL)").fetchone()[0]
+    db.close()
+    assert kin_person is None  # under the threshold: never joined
+    assert [p for p, _ in offered] == ["Sam"] and 0.2 < offered[0][1] < 0.4  # Zed is too unlike to offer
+    assert named == 0  # only clusters still to name get a hint

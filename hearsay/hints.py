@@ -2,9 +2,9 @@
 the operator's tags alone.
 
 A hint is taken when the operator names a cluster with it (the tag says
-"via": "place" or "media"). Since name tags also carry what was "offered",
-a name typed while the hint offered it counts as a missed tap, and a name
-that wasn't among those offered as a hint that was wrong. A taken hint is
+"via": "voice", "place" or "media"). Since name tags also carry what each
+hint "offered", a name typed while the hint offered it counts as a missed
+tap, and a name that wasn't among those it offered as the hint being wrong. A taken hint is
 undone when a later tag gives any of its stretches another name.
 
 Standard library only, so it runs on the NAS as is:
@@ -20,7 +20,8 @@ from itertools import pairwise
 from pathlib import Path
 
 # When each hint was first offered; earlier tags say nothing about them.
-SHIPPED = {"place": datetime.fromisoformat("2026-10-07T21:06:52+00:00"),
+SHIPPED = {"voice": datetime.fromisoformat("2026-10-13T19:00:00+00:00"),
+           "place": datetime.fromisoformat("2026-10-07T21:06:52+00:00"),
            "media": datetime.fromisoformat("2026-10-07T21:20:11+00:00")}
 # A gap longer than this between tags is a new sitting, not time spent naming.
 SITTING = 600
@@ -29,7 +30,9 @@ SITTING = 600
 def report(tags: list[dict]) -> dict[str, dict]:
     for tag in tags:
         tag["when"] = datetime.fromisoformat(tag["tagged_at"])
-    return {"place": measure(tags, "place", lambda name: not name.startswith("_")),
+    person = lambda name: not name.startswith("_")
+    return {"voice": measure(tags, "voice", person),
+            "place": measure(tags, "place", person),
             "media": measure(tags, "media", lambda name: name == "_media")}
 
 
@@ -40,13 +43,14 @@ def measure(tags: list[dict], via: str, counts) -> dict:
              and t["when"] >= SHIPPED[via]]
     taken = [t for t in named if t.get("via") == via]
     typed = [t for t in named if t.get("via") != via]
-    known = [t for t in named if "offered" in t]
+    # What this hint offered, where the tag says (it has since 2026-10-13).
+    known = [(t, t["offered"].get(via, [])) for t in named if isinstance(t.get("offered"), dict)]
     return {
         "named": len(named),
         "taken": len(taken),
         "typed": len(typed),
-        "typed_while_offered": sum(t["name"] in t["offered"] for t in known if t.get("via") != via),
-        "not_offered": sum(t["name"] not in t["offered"] for t in known),
+        "typed_while_offered": sum(t["name"] in offered for t, offered in known if t.get("via") != via),
+        "not_offered": sum(t["name"] not in offered for t, offered in known),
         "with_offers": len(known),
         "undone": sum(undone(t, tags) for t in taken),
         "seconds_taken": median_gap(taken, tags),

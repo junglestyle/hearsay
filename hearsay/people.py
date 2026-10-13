@@ -29,6 +29,13 @@ CLUSTER_THRESHOLD = 0.40
 # person rather than scraps of one.
 MIN_VOICE_SECONDS = 60
 
+# Named people offered on an unnamed cluster's page, closest voice first, and
+# how alike they must sound at least. Left out one at a time, operator-named
+# speakers under CLUSTER_THRESHOLD to their own person (2026-10-13, 16 of 60)
+# had the right person first for 9 and in the top three for 14.
+VOICE_HINTS = 3
+VOICE_FLOOR = 0.20
+
 SCHEMA = """
 DROP TABLE IF EXISTS turn_people;
 -- One row per turn labeled not_owner, by voice, by channel or inherited by diarization.
@@ -39,6 +46,15 @@ CREATE TABLE turn_people (
     name_conflict INTEGER NOT NULL,  -- 1 if the cluster's tagged turns carry different names
     split INTEGER NOT NULL,          -- 1 if its diarized speaker was split in voices
     fit REAL                         -- cosine to its cluster's mean voice; NULL if not clustered by voice
+);
+DROP TABLE IF EXISTS cluster_voices;
+-- For each unnamed cluster, the named people it sounds most like, though not
+-- enough to join them: a hint for the portal, never applied.
+CREATE TABLE cluster_voices (
+    cluster TEXT NOT NULL,           -- as in turn_people
+    person TEXT NOT NULL,
+    similarity REAL NOT NULL,        -- average cosine between their speakers' voices
+    PRIMARY KEY (cluster, person)
 );
 """
 
@@ -142,6 +158,28 @@ def voices(vectors, seconds: list[float], marked: bool) -> list[int] | None:
                             for k in range(len(centers))])
         centers /= np.linalg.norm(centers, axis=1, keepdims=True)
     return side
+
+
+def closest_voices(vectors, labels: list[int], person_of: dict[int, str | None]) -> dict[int, list[tuple[str, float]]]:
+    """For each cluster without a name, the named people whose speakers its own
+    are most alike on average (average linkage, as clustering compares them)."""
+    import numpy as np
+
+    v = np.array(vectors)
+    by_person = {}
+    for i, c in enumerate(labels):
+        person = person_of.get(c)
+        if person and not person.startswith("_"):
+            by_person.setdefault(person, []).append(i)
+    found = {}
+    for c in sorted(set(labels)):
+        if c not in person_of or person_of[c] is not None:
+            continue
+        own = [i for i, label in enumerate(labels) if label == c]
+        scores = sorted(((float((v[own] @ v[theirs].T).mean()), person) for person, theirs in by_person.items()),
+                        reverse=True)
+        found[c] = [(person, round(score, 3)) for score, person in scores[:VOICE_HINTS] if score >= VOICE_FLOOR]
+    return found
 
 
 def speaker_vectors(rows, mixed: set[tuple[str, str]]) -> tuple[list[list[str]], list[list[float]], list[tuple]]:
@@ -252,14 +290,20 @@ def group_people(db_path: Path) -> dict:
             fit |= {t: round(sum(a * b for a, b in zip(embeddings[t], center)), 3) for t in turn_ids}
 
         out = []
+        person_of = {}  # None for unnamed; conflicting clusters left out
         for c, turn_ids in members.items():
             person, conflict = cluster_name(named_by[c], names)
             out += [(t, min(turn_ids), person, int(conflict), int(t in split), fit.get(t)) for t in turn_ids]
+            if not conflict:
+                person_of[c] = person
+        hints = [(min(members[c]), person, similarity)
+                 for c, found in closest_voices(vectors, labels, person_of).items() for person, similarity in found]
         out += [(t, t, clips[t], 0, 0, None) for (t,) in db.execute("SELECT turn_id FROM turn_speakers WHERE label = 'not_owner'")
                 if t in clips]
 
         db.executescript(SCHEMA)
         db.executemany("INSERT INTO turn_people VALUES (?,?,?,?,?,?)", sorted(out))
+        db.executemany("INSERT INTO cluster_voices VALUES (?,?,?)", sorted(hints))
         db.commit()
     finally:
         db.close()
