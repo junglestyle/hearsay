@@ -49,7 +49,9 @@ if [ "$migrate" = true ]; then
     # Nothing may write to the old datasets between snapshot and switch-over.
     echo "Stopping Hearsay to move it from $NAS_OLD_DATASET"
     [ -z "$cron_id" ] || midclt call cronjob.update "$cron_id" '{"enabled": false}' >/dev/null
-    "${COMPOSE[@]}" down --remove-orphans
+    # By project label, not `compose down`: the compose file reads env files
+    # from the new datasets, which don't exist yet.
+    docker ps -aq --filter label=com.docker.compose.project=hearsay | xargs -r docker rm -f
     echo "waiting for any reprocess run in progress..."
     flock /run/hearsay-reprocess.lock true
 fi
