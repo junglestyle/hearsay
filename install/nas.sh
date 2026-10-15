@@ -20,7 +20,7 @@ say "Checking the repo is at $NAS_REPO_DIR"
 # The cron job and compose run from this clone, and the old one under
 # $NAS_OLD_DATASET goes away with it.
 [ "$REPO_DIR" = "$NAS_REPO_DIR" ] || die "this is $REPO_DIR. As admin (not root):
-  git clone https://github.com/nathancurry/hearsay.git $NAS_REPO_DIR
+  git clone https://github.com/junglestyle/hearsay.git $NAS_REPO_DIR
 then: sudo $NAS_REPO_DIR/install/nas.sh"
 echo "ok"
 

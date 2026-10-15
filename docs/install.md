@@ -13,7 +13,7 @@ Secrets are kept in env files outside the repo.
 2. **NAS (TrueNAS SCALE 25.04+):** clone the repo as `admin` into the
    `fast/repos` dataset and run [`install/nas.sh`](../install/nas.sh) with sudo:
    ```sh
-   git clone https://github.com/nathancurry/hearsay.git /mnt/fast/repos/hearsay
+   git clone https://github.com/junglestyle/hearsay.git /mnt/fast/repos/hearsay
    sudo /mnt/fast/repos/hearsay/install/nas.sh
    ```
    This creates the datasets under `fast/hearsay` (the NVMe pool) and the
