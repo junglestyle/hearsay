@@ -36,11 +36,11 @@ from hearsay.speakers import DIARIZATION_AGREEMENT, NOT_OWNER_THRESHOLD, OWNER_T
 from hearsay.turns import wall
 
 NAS = "nas"
-DB = "/mnt/storage/hearsay/db/hearsay.sqlite"
-AUDIO_DIR = "/mnt/storage/hearsay/audio"
-LABELS = "/mnt/storage/hearsay/labels/labels.jsonl"
-ENROLLMENT = "/mnt/storage/hearsay/labels/enrollment.json"
-IMPORTS = "/mnt/storage/hearsay/imports"
+DB = "/mnt/fast/hearsay/db/hearsay.sqlite"
+AUDIO_DIR = "/mnt/fast/hearsay/audio"
+LABELS = "/mnt/fast/hearsay/labels/labels.jsonl"
+ENROLLMENT = "/mnt/fast/hearsay/labels/enrollment.json"
+IMPORTS = "/mnt/fast/hearsay/imports"
 ANSWERS = {"m": "owner", "n": "not_owner", "u": "unsure"}
 
 CANDIDATES_SQL = """

@@ -3,7 +3,8 @@
 Reads the conversations found in the stream (hearsay/conversations.py) and
 the raw audio bodies. Writes one WAV per conversation plus the
 conversation_audio table. Everything here is derived from raw and is rebuilt
-on every run.
+on every run, but a WAV is only written when its bytes change: the NAS
+snapshots the audio, so rewriting unchanged WAVs would keep copies of them.
 
 Omi posts audio in bursts: 5-6 s of audio as 1 s chunks ~0.09 s apart
 (measured on real captures). Consecutive bursts are nearly always contiguous
@@ -13,6 +14,7 @@ audio was lost.
 """
 
 import hashlib
+import io
 import sqlite3
 import wave
 from datetime import datetime, timezone
@@ -131,14 +133,23 @@ def cut(raw_dir: Path, bursts: list, start: float, duration: float) -> tuple[byt
     return bytes(pcm), (covered_samples / total if total else 0.0)
 
 
-def write_wav(path: Path, pcm: bytes) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    with wave.open(str(tmp), "wb") as w:
+def write_wav(path: Path, pcm: bytes) -> tuple[str, bool]:
+    """Write path unless it already holds exactly this audio. Returns the
+    WAV's sha256 and whether it was written."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(SAMPLE_RATE)
         w.writeframes(pcm)
+    data = buf.getvalue()
+    sha256 = hashlib.sha256(data).hexdigest()
+    if path.exists() and path.stat().st_size == len(data) and path.read_bytes() == data:
+        return sha256, False
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
     tmp.replace(path)
+    return sha256, True
 
 
 def assemble(raw_dir: Path, db_path: Path, audio_dir: Path) -> dict:
@@ -146,6 +157,7 @@ def assemble(raw_dir: Path, db_path: Path, audio_dir: Path) -> dict:
     try:
         bursts = place_bursts(db)
         rows = []
+        written = 0
         for conversation_id, start, end in db.execute(
             "SELECT conversation_id, start, end FROM conversations ORDER BY start"
         ).fetchall():
@@ -153,8 +165,8 @@ def assemble(raw_dir: Path, db_path: Path, audio_dir: Path) -> dict:
             wav_file = wav_sha256 = None
             if coverage > 0:
                 wav_file = f"{conversation_id}.wav"
-                write_wav(audio_dir / wav_file, pcm)
-                wav_sha256 = hashlib.sha256((audio_dir / wav_file).read_bytes()).hexdigest()
+                wav_sha256, changed = write_wav(audio_dir / wav_file, pcm)
+                written += changed
             zero_at = datetime.fromtimestamp(start, timezone.utc).isoformat()
             rows.append((conversation_id, zero_at, end - start, coverage, wav_file, wav_sha256))
 
@@ -164,7 +176,7 @@ def assemble(raw_dir: Path, db_path: Path, audio_dir: Path) -> dict:
     finally:
         db.close()
 
-    return {"conversations": len(rows), "with_audio": sum(1 for r in rows if r[4])}
+    return {"conversations": len(rows), "with_audio": sum(1 for r in rows if r[4]), "wavs_written": written}
 
 
 def remove_stale_wavs(audio_dir: Path, db_path: Path) -> int:

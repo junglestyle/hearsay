@@ -9,7 +9,7 @@ undone when a later tag gives any of its stretches another name.
 
 Standard library only, so it runs on the NAS as is:
 
-    python3 -m hearsay.hints /mnt/storage/hearsay/labels/tags.jsonl
+    python3 -m hearsay.hints /mnt/fast/hearsay/labels/tags.jsonl
 """
 
 import json
@@ -88,7 +88,7 @@ def seconds(value: float | None) -> str:
 
 
 def main() -> None:
-    path = Path(sys.argv[1] if len(sys.argv) > 1 else "/mnt/storage/hearsay/labels/tags.jsonl")
+    path = Path(sys.argv[1] if len(sys.argv) > 1 else "/mnt/fast/hearsay/labels/tags.jsonl")
     tags = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     for via, found in report(tags).items():
         print(f"{via} hint (since {SHIPPED[via]:%Y-%m-%d}): {found['named']} named,"

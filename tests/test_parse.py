@@ -1,42 +1,57 @@
+import hashlib
+import itertools
+import json
 import os
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from hearsay.assemble import assemble
 from hearsay.conversations import find_conversations
 from hearsay.imports import load_imports
 from hearsay.parse import ParseFailed, rebuild
 from hearsay.people import group_people
-from hearsay.receiver import create_app
 from hearsay.speakers import label_speakers
 from hearsay.turns import build_turns, record_operator_input
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def post(client, webhook_type, body, idempotency_key, query="uid=test-uid"):
-    content_type = "application/octet-stream" if webhook_type == "audio" else "application/json"
-    resp = client.post(
-        f"/omi/{webhook_type}?token=s3cret&{query}",
-        content=body,
-        headers={"Content-Type": content_type, "Idempotency-Key": idempotency_key},
-    )
-    assert resp.status_code == 200
+RECEIVED = itertools.count()
+
+
+def post(raw_dir, webhook_type, body, idempotency_key, query="uid=test-uid"):
+    """Write a payload as Omi's webhook receiver did (removed with the tunnel;
+    its raw payloads are kept and still parsed): body, then sidecar."""
+    now = datetime(2026, 9, 1, tzinfo=timezone.utc) + timedelta(seconds=next(RECEIVED))
+    day_dir = raw_dir / webhook_type / now.strftime("%Y-%m-%d")
+    day_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"{now.strftime('%Y%m%dT%H%M%S.%fZ')}-{os.urandom(4).hex()}"
+    sidecar = {
+        "received_at": now.isoformat(),
+        "webhook_type": webhook_type,
+        "method": "POST",
+        "path": f"/omi/{webhook_type}",
+        "query": [pair.split("=", 1) for pair in query.split("&")],
+        "headers": [["idempotency-key", idempotency_key]],
+        "body_bytes": len(body),
+        "body_sha256": hashlib.sha256(body).hexdigest(),
+        "body_file": f"{stem}.body",
+    }
+    (day_dir / f"{stem}.body").write_bytes(body)
+    (day_dir / f"{stem}.json").write_text(json.dumps(sidecar))
 
 
 def capture_synthetic_raw(raw_dir):
-    """Write synthetic payloads through the real receiver, so the raw layout is its own."""
-    client = TestClient(create_app(raw_dir, "s3cret"))
     transcript_1 = (FIXTURES / "transcript_1.json").read_bytes()
-    post(client, "transcript", transcript_1, "key-t1")
-    post(client, "transcript", transcript_1, "key-t1")  # Omi retry
-    post(client, "transcript", (FIXTURES / "transcript_2.json").read_bytes(), "key-t2")
-    post(client, "audio", b"\x00\x01" * 16000, "key-a1", "sample_rate=16000&uid=test-uid")
-    post(client, "audio", b"\x00\x01" * 1600, "key-a2", "sample_rate=16000&uid=test-uid")
-    post(client, "memory", (FIXTURES / "memory.json").read_bytes(), "key-m1")
+    post(raw_dir, "transcript", transcript_1, "key-t1")
+    post(raw_dir, "transcript", transcript_1, "key-t1")  # Omi retry
+    post(raw_dir, "transcript", (FIXTURES / "transcript_2.json").read_bytes(), "key-t2")
+    post(raw_dir, "audio", b"\x00\x01" * 16000, "key-a1", "sample_rate=16000&uid=test-uid")
+    post(raw_dir, "audio", b"\x00\x01" * 1600, "key-a2", "sample_rate=16000&uid=test-uid")
+    post(raw_dir, "memory", (FIXTURES / "memory.json").read_bytes(), "key-m1")
 
 
 def snapshot(root):
@@ -93,7 +108,7 @@ def test_failed_rebuild_keeps_previous_database(tmp_path, damage):
     good = dump(db_path)
 
     if damage == "malformed_transcript":
-        post(TestClient(create_app(raw, "s3cret")), "transcript", b'[{"text": "bare array"}]', "key-bad")
+        post(raw, "transcript", b'[{"text": "bare array"}]', "key-bad")
     else:
         next(raw.glob("memory/*/*.body")).write_bytes(b"{}")
 

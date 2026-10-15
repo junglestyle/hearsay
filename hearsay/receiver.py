@@ -1,15 +1,16 @@
-"""Receivers: authenticate, then write the body to disk verbatim.
+"""The capture receiver: authenticate, then write the body to disk verbatim.
 
-Two apps, run as separate containers. The Omi webhook receiver is public,
-behind the Cloudflare tunnel. Omi can't send custom headers or sign
-requests, so its shared secret travels as a `token` query parameter. The
-capture receiver takes our own recorder's uploads (hearsay/capture.py) and
-listens on the tailnet only, since its bodies are audio; its token is a
-bearer header. Neither secret is ever written to disk or logged.
+It takes our own recorders' uploads (hearsay/capture.py) and listens on the
+tailnet only, since its bodies are audio. Its token is a bearer header,
+never written to disk or logged.
 
-Rejected requests are logged (type, whether a token was sent, and the
-Cloudflare client IP), so a sender with a wrong token shows up in
-`docker logs` instead of vanishing.
+Omi's webhooks used to land here too, through a public Cloudflare tunnel;
+both were removed once Omi was no longer used (its last payload is from
+2026-09-30). Those raw payloads are kept and still parsed (hearsay/parse.py).
+
+Rejected requests are logged (whether a token was sent, and the client
+address), so a sender with a wrong token shows up in the journal instead of
+vanishing.
 """
 
 import hashlib
@@ -42,7 +43,7 @@ def authorized(request: Request, kind: str, token: str, secret: str) -> bool:
         "rejected %s upload: %s token, client %s",
         kind,
         "wrong" if token else "no",
-        request.headers.get("cf-connecting-ip", "direct"),
+        request.client.host if request.client else "unknown",
     )
     return False
 
@@ -70,33 +71,6 @@ async def store(raw_dir: Path, request: Request, kind: str) -> None:
     write_atomically(day_dir / f"{stem}.json", json.dumps(sidecar, indent=2).encode())
 
 
-def create_app(raw_dir: Path, secret: str) -> FastAPI:
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-
-    async def webhook(request: Request, webhook_type: str) -> Response:
-        if not authorized(request, webhook_type, request.query_params.get("token", ""), secret):
-            return Response(status_code=401)
-        await store(raw_dir, request, webhook_type)
-
-        # Empty 200: a JSON {"message": ...} on the transcript hook would push
-        # a notification to the phone.
-        return Response(status_code=200)
-
-    @app.post("/omi/transcript")
-    async def transcript(request: Request) -> Response:
-        return await webhook(request, "transcript")
-
-    @app.post("/omi/audio")
-    async def audio(request: Request) -> Response:
-        return await webhook(request, "audio")
-
-    @app.post("/omi/memory")
-    async def memory(request: Request) -> Response:
-        return await webhook(request, "memory")
-
-    return app
-
-
 def create_capture_app(raw_dir: Path, token: str) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -117,10 +91,3 @@ def capture_app_from_env() -> FastAPI:
         raise RuntimeError("HEARSAY_CAPTURE_TOKEN is empty")
     return create_capture_app(Path(os.environ["HEARSAY_RAW_DIR"]), token)
 
-
-def app_from_env() -> FastAPI:
-    secret = os.environ["HEARSAY_SECRET"]
-    raw_dir = Path(os.environ["HEARSAY_RAW_DIR"])
-    if not secret:
-        raise RuntimeError("HEARSAY_SECRET is empty")
-    return create_app(raw_dir, secret)

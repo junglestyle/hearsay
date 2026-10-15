@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# TrueNAS SCALE: datasets, secrets, images, receiver, portal and capture containers.
-# Run as root from the cloned repo. Safe to re-run; also how updates are deployed.
+# TrueNAS SCALE: datasets on the fast pool (moved from storage once), secrets,
+# images, portal and capture containers, the hourly reprocess.
+# Run as root from the clone in /mnt/fast/repos/hearsay. Safe to re-run; also
+# how updates are deployed.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
 require_root
+COMPOSE=(docker compose -f "$REPO_DIR/install/compose.yaml")
+CHILDREN=(config raw db audio labels transcripts imports stream)
 
 say "Checking Docker"
 if ! docker info >/dev/null 2>&1; then
@@ -12,18 +16,81 @@ if ! docker info >/dev/null 2>&1; then
     die "Docker isn't running. In the TrueNAS UI: Apps -> Configuration -> Choose Pool. Then re-run."
 fi
 
-say "Datasets under $NAS_POOL_DATASET"
-# midclt (not raw zfs) so the TrueNAS UI knows about them.
-for ds in "$NAS_POOL_DATASET" "$NAS_POOL_DATASET/config" "$NAS_POOL_DATASET/raw" "$NAS_POOL_DATASET/db" "$NAS_POOL_DATASET/audio" "$NAS_POOL_DATASET/labels" "$NAS_POOL_DATASET/transcripts" "$NAS_POOL_DATASET/imports" "$NAS_POOL_DATASET/stream"; do
-    if zfs list -H -o name "$ds" >/dev/null 2>&1; then
-        echo "exists: $ds"
-    else
-        midclt call pool.dataset.create "{\"name\": \"$ds\"}" >/dev/null
-        echo "created: $ds"
+say "Checking the repo is at $NAS_REPO_DIR"
+# The cron job and compose run from this clone, and the old one under
+# $NAS_OLD_DATASET goes away with it.
+[ "$REPO_DIR" = "$NAS_REPO_DIR" ] || die "this is $REPO_DIR. As admin (not root):
+  git clone https://github.com/nathancurry/hearsay.git $NAS_REPO_DIR
+then: sudo $NAS_REPO_DIR/install/nas.sh"
+echo "ok"
+
+say "Retiring Omi's webhook receiver and its Cloudflare tunnel"
+# Omi isn't used any more (last payload 2026-09-30); its raw payloads stay.
+for container in hearsay-tunnel hearsay; do
+    if docker inspect "$container" >/dev/null 2>&1; then
+        docker rm -f "$container" >/dev/null
+        echo "removed container: $container"
     fi
 done
-[ -d "$NAS_RAW" ] && [ -d "$NAS_CONFIG" ] && [ -d "$NAS_DB" ] && [ -d "$NAS_AUDIO" ] && [ -d "$NAS_LABELS" ] && [ -d "$NAS_TRANSCRIPTS" ] && [ -d "$NAS_IMPORTS" ] && [ -d "$NAS_STREAM" ] || die "datasets not mounted under $NAS_ROOT"
+echo "ok"
 
+cron_id="$(midclt call cronjob.query '[["description", "=", "hearsay reprocess"]]' \
+    | python3 -c 'import json, sys; jobs = json.load(sys.stdin); print(jobs[0]["id"] if jobs else "")')"
+
+say "Datasets under $NAS_POOL_DATASET"
+migrate=false
+for ds in "${CHILDREN[@]}"; do
+    if ! zfs list -H -o name "$NAS_POOL_DATASET/$ds" >/dev/null 2>&1 \
+        && zfs list -H -o name "$NAS_OLD_DATASET/$ds" >/dev/null 2>&1; then
+        migrate=true
+    fi
+done
+if [ "$migrate" = true ]; then
+    # Nothing may write to the old datasets between snapshot and switch-over.
+    echo "Stopping Hearsay to move it from $NAS_OLD_DATASET"
+    [ -z "$cron_id" ] || midclt call cronjob.update "$cron_id" '{"enabled": false}' >/dev/null
+    "${COMPOSE[@]}" down --remove-orphans
+    echo "waiting for any reprocess run in progress..."
+    flock /run/hearsay-reprocess.lock true
+fi
+# midclt (not raw zfs) so the TrueNAS UI knows about the ones made here.
+if ! zfs list -H -o name "$NAS_POOL_DATASET" >/dev/null 2>&1; then
+    midclt call pool.dataset.create "{\"name\": \"$NAS_POOL_DATASET\"}" >/dev/null
+    echo "created: $NAS_POOL_DATASET"
+fi
+for ds in "${CHILDREN[@]}"; do
+    new="$NAS_POOL_DATASET/$ds" old="$NAS_OLD_DATASET/$ds"
+    if zfs list -H -o name "$new" >/dev/null 2>&1; then
+        echo "exists: $new"
+    elif zfs list -H -o name "$old" >/dev/null 2>&1; then
+        # send -p keeps the dataset's properties; recv is all or nothing, so
+        # a re-run after an interruption sends it again.
+        snap="$old@moved-to-fast"
+        zfs list -H -o name "$snap" >/dev/null 2>&1 || zfs snapshot "$snap"
+        zfs send -p "$snap" | zfs recv "$new"
+        zfs destroy "$new@moved-to-fast"
+        echo "moved: $old -> $new"
+    else
+        midclt call pool.dataset.create "{\"name\": \"$new\"}" >/dev/null
+        echo "created: $new"
+    fi
+done
+for ds in "${CHILDREN[@]}"; do
+    [ -d "$NAS_ROOT/$ds" ] || die "$NAS_POOL_DATASET/$ds isn't mounted at $NAS_ROOT/$ds"
+done
+if zfs list -H -o name "$NAS_OLD_DATASET" >/dev/null 2>&1 \
+    && [ "$(zfs get -H -o value readonly "$NAS_OLD_DATASET")" != on ]; then
+    # Kept until the operator destroys it, read-only so that anything still
+    # pointed at it (an old clone, a stale timer) fails instead of writing
+    # where nobody reads.
+    zfs set readonly=on "$NAS_OLD_DATASET"
+    echo "read-only now: $NAS_OLD_DATASET"
+fi
+
+# Each dataset below guards itself; members of the apps group (the dev box's
+# ssh login, consumers) need to get through this one.
+chown root:root "$NAS_ROOT"
+chmod 755 "$NAS_ROOT"
 chown root:root "$NAS_CONFIG"
 chmod 700 "$NAS_CONFIG"
 chown "$APPS_UID:$APPS_GID" "$NAS_RAW"
@@ -42,20 +109,47 @@ for dir in "$NAS_LABELS" "$NAS_TRANSCRIPTS" "$NAS_IMPORTS"; do
     chmod 2770 "$dir"
 done
 
-say "Idea Machine's vocab folder $IDEAMACHINE_VOCAB_DIR"
-# The portal mounts it read-only. Made here only if Idea Machine hasn't yet,
-# owned like the stream (the apps group), so Docker doesn't make it root's
-# and lock Idea Machine out of writing vocab.json.
-if [ -d "$IDEAMACHINE_VOCAB_DIR" ]; then
-    echo "exists: $IDEAMACHINE_VOCAB_DIR"
+say "Idea Machine's vocab folder"
+# The portal mounts it read-only. Idea Machine moves it to the fast pool on
+# its own schedule; re-running this script after that switches the portal over.
+# Made here only if Idea Machine hasn't yet, owned like the stream (the apps
+# group), so Docker doesn't make it root's and lock Idea Machine out.
+if [ -d "$IDEAMACHINE_VOCAB_FAST" ]; then
+    IDEAMACHINE_VOCAB_DIR="$IDEAMACHINE_VOCAB_FAST"
+    echo "using: $IDEAMACHINE_VOCAB_DIR"
+elif [ -d "$IDEAMACHINE_VOCAB_OLD" ]; then
+    IDEAMACHINE_VOCAB_DIR="$IDEAMACHINE_VOCAB_OLD"
+    echo "using: $IDEAMACHINE_VOCAB_DIR ($IDEAMACHINE_VOCAB_FAST doesn't exist yet)"
 else
+    IDEAMACHINE_VOCAB_DIR="$IDEAMACHINE_VOCAB_OLD"
     install -d -o "$APPS_UID" -g "$APPS_GID" -m 2770 "$IDEAMACHINE_VOCAB_DIR"
     echo "created: $IDEAMACHINE_VOCAB_DIR (Idea Machine writes vocab.json there)"
 fi
 export IDEAMACHINE_VOCAB_DIR
 
-say "Receiver secret in $NAS_RECEIVER_ENV"
-env_ensure "$NAS_RECEIVER_ENV" HEARSAY_SECRET "$(openssl rand -hex 32)"
+tunnel_env="$NAS_CONFIG/tunnel.env"
+if [ -f "$tunnel_env" ]; then
+    host="$(env_get "$tunnel_env" HEARSAY_PUBLIC_HOST)"
+    say "Delete the Cloudflare tunnel"
+    # Manual: needs the operator's Cloudflare account.
+    cat <<EOF
+The tunnel's container is gone. In the Cloudflare dashboard:
+  1. Zero Trust -> Networks -> Tunnels: delete the tunnel named hearsay.
+  2. DNS for your zone: delete the record for ${host:-the receiver's hostname}.
+In the Omi app, you can also turn off the three webhooks.
+EOF
+    confirm "Deleted both in Cloudflare?"
+    if [ -n "$host" ]; then
+        while getent hosts "$host" >/dev/null; do
+            echo "$host still resolves (DNS can take a few minutes to forget it)."
+            confirm "Check again?"
+        done
+        echo "$host no longer resolves"
+    fi
+    # The tunnel token and Omi's webhook secret guard nothing now.
+    rm -f "$tunnel_env" "$NAS_CONFIG/receiver.env"
+    echo "removed $tunnel_env and $NAS_CONFIG/receiver.env"
+fi
 
 say "Portal login in $NAS_PORTAL_ENV"
 env_ensure "$NAS_PORTAL_ENV" HEARSAY_PORTAL_USER hearsay
@@ -79,45 +173,15 @@ export HEARSAY_LAN_IP HEARSAY_TAILNET_IP
 
 say "Building images"
 # Baked into the worker image and recorded by each reprocess run, so a stale
-# image is visible. safe.directory: root runs git in a clone owned by apps.
+# image is visible. safe.directory: root runs git in a clone owned by admin.
 HEARSAY_COMMIT="$(git -c safe.directory="$REPO_DIR" -C "$REPO_DIR" describe --always --dirty)"
 export HEARSAY_COMMIT
 # --profile tools also builds the one-shot worker (reprocess) and check images.
-docker compose -f "$REPO_DIR/install/compose.yaml" --profile tools build
+"${COMPOSE[@]}" --profile tools build
 
-say "Starting receiver, portal and capture receiver"
-docker compose -f "$REPO_DIR/install/compose.yaml" up -d
-
-say "Verifying receiver rejects unauthenticated requests"
-wait_for_401 "http://127.0.0.1:$NAS_RECEIVER_PORT/omi/transcript" 30
-
-say "Hourly reprocess (TrueNAS cron job)"
-# At :30, offset from the dev box's transcription timer at :00, so new audio
-# goes WAV -> transcript -> turns within about an hour. flock skips a run
-# while the previous one is still going. Registered through midclt so it
-# shows in the TrueNAS UI (System -> Advanced -> Cron Jobs) and survives updates.
-# The middleware appends its own "> /dev/null 2> /dev/null" to the command,
-# which would override a redirect at the end of it, so ours sits inside an
-# outer subshell.
-mkdir -p "$NAS_LOGS"
-chown "root:$APPS_GID" "$NAS_LOGS"
-chmod 750 "$NAS_LOGS"
-REPROCESS_CMD="( (date -Is; flock -n /run/hearsay-reprocess.lock docker compose -f $REPO_DIR/install/compose.yaml run --rm -T reprocess </dev/null) >> $NAS_LOGS/reprocess.log 2>&1 )"
-cron_payload="$(python3 -c '
-import json, sys
-print(json.dumps({"user": "root", "command": sys.argv[1], "description": "hearsay reprocess",
-                  "schedule": {"minute": "30", "hour": "*", "dom": "*", "month": "*", "dow": "*"},
-                  "enabled": True, "stdout": True, "stderr": True}))' "$REPROCESS_CMD")"
-cron_id="$(midclt call cronjob.query '[["description", "=", "hearsay reprocess"]]' \
-    | python3 -c 'import json, sys; jobs = json.load(sys.stdin); print(jobs[0]["id"] if jobs else "")')"
-if [ -z "$cron_id" ]; then
-    midclt call cronjob.create "$cron_payload" >/dev/null
-    echo "created: hourly reprocess at :30"
-else
-    midclt call cronjob.update "$cron_id" "$cron_payload" >/dev/null
-    echo "up to date: hourly reprocess at :30 (job $cron_id)"
-fi
-echo "log: $NAS_LOGS/reprocess.log"
+say "Starting portal and capture receiver"
+# --remove-orphans: the old Omi receiver was a service of this project.
+"${COMPOSE[@]}" up -d --remove-orphans
 
 say "Verifying the portal answers on both addresses"
 for ip in "$HEARSAY_LAN_IP" "$HEARSAY_TAILNET_IP"; do
@@ -132,9 +196,50 @@ fi
 
 say "Checking that every captured payload parses"
 # -T and /dev/null: never read the terminal, so typing ahead isn't swallowed.
-docker compose -f "$REPO_DIR/install/compose.yaml" run --rm -T check </dev/null
+"${COMPOSE[@]}" run --rm -T check </dev/null
 
-say "Receiver is up on 127.0.0.1:$NAS_RECEIVER_PORT. Next: install/tunnel.sh"
+say "Reprocessing now"
+# Waits for a run in progress. Its output is in the journal too:
+# journalctl -t hearsay-reprocess
+flock /run/hearsay-reprocess.lock "${COMPOSE[@]}" run --rm -T reprocess </dev/null
+
+say "Hourly reprocess (TrueNAS cron job)"
+# At :30, offset from the dev box's transcription timer at :00, so new audio
+# goes WAV -> transcript -> turns within about an hour. flock skips a run
+# while the previous one is still going. Registered through midclt so it
+# shows in the TrueNAS UI (System -> Advanced -> Cron Jobs) and survives updates.
+# Output goes to the journal, not a file on either pool. The middleware
+# appends its own "> /dev/null 2> /dev/null" to the command, so the pipe
+# sits inside an outer subshell.
+REPROCESS_CMD="( flock -n /run/hearsay-reprocess.lock ${COMPOSE[*]} run --rm -T reprocess </dev/null 2>&1 | logger -t hearsay-reprocess )"
+cron_payload="$(python3 -c '
+import json, sys
+print(json.dumps({"user": "root", "command": sys.argv[1], "description": "hearsay reprocess",
+                  "schedule": {"minute": "30", "hour": "*", "dom": "*", "month": "*", "dow": "*"},
+                  "enabled": True, "stdout": True, "stderr": True}))' "$REPROCESS_CMD")"
+if [ -z "$cron_id" ]; then
+    midclt call cronjob.create "$cron_payload" >/dev/null
+    echo "created: hourly reprocess at :30"
+else
+    midclt call cronjob.update "$cron_id" "$cron_payload" >/dev/null
+    echo "up to date: hourly reprocess at :30 (job $cron_id)"
+fi
+echo "log: journalctl -t hearsay-reprocess"
+
+say "Verifying uploads land in $NAS_RAW"
+# Manual: only the operator's phone (or Mac) can send a real upload.
+marker="$(mktemp)"
+trap 'rm -f "$marker"' EXIT
+echo "Record for a minute with the iPhone app (or the Mac's recorder). Waiting up to 5 minutes..."
+for _ in $(seq 300); do
+    [ -z "$(find "$NAS_RAW/capture" -name '*.json' -newer "$marker" -print -quit 2>/dev/null)" ] || break
+    sleep 1
+done
+[ -n "$(find "$NAS_RAW/capture" -name '*.json' -newer "$marker" -print -quit 2>/dev/null)" ] \
+    || die "no upload arrived in $NAS_RAW/capture. Check the app's capture URL and token, then re-run."
+echo "received an upload in $NAS_RAW/capture"
+
+say "Hearsay is running from $NAS_ROOT"
 # Manual: the password manager is on the operator's devices.
 cat <<EOF
 
@@ -148,3 +253,12 @@ Capture receiver, for the iPhone app (install/ios.sh on the Mac):
   URL:   http://$HEARSAY_TAILNET_IP:$NAS_CAPTURE_PORT/capture
   token: sudo sed -n 's/^HEARSAY_CAPTURE_TOKEN=//p' $NAS_CAPTURE_ENV
 EOF
+if zfs list -H -o name "$NAS_OLD_DATASET" >/dev/null 2>&1; then
+    cat <<EOF
+
+The old copy is still on the storage pool, read-only. Once you've confirmed
+Hearsay works from $NAS_ROOT, destroy it (its old repo clone and
+logs/reprocess.log go with it):
+  sudo zfs destroy -r $NAS_OLD_DATASET
+EOF
+fi

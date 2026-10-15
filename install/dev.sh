@@ -16,11 +16,11 @@ say "Installing into $REPO_DIR/.venv"
 
 say "Dev config at $DEV_ENV"
 mkdir -p "$(dirname "$DEV_ENV")" "$DEV_RAW"
-env_ensure "$DEV_ENV" HEARSAY_SECRET "$(openssl rand -hex 32)"
+env_ensure "$DEV_ENV" HEARSAY_CAPTURE_TOKEN "$(openssl rand -hex 32)"
 env_ensure "$DEV_ENV" HEARSAY_RAW_DIR "$DEV_RAW"
 
 say "Running tests"
 (cd "$REPO_DIR" && .venv/bin/pytest -q)
 
-say "Done. Run the receiver locally with:"
-echo "  (set -a; . $DEV_ENV; cd $REPO_DIR && .venv/bin/uvicorn --factory hearsay.receiver:app_from_env --no-access-log)"
+say "Done. Run the capture receiver locally with:"
+echo "  (set -a; . $DEV_ENV; cd $REPO_DIR && .venv/bin/uvicorn --factory hearsay.receiver:capture_app_from_env --no-access-log)"

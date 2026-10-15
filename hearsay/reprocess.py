@@ -5,18 +5,26 @@ Turns come from transcripts the dev box makes of each WAV (hearsay/transcribe.py
 so new audio takes a reprocess, a transcription run, then another reprocess.
 On the NAS this runs hourly (install/nas.sh), offset from the dev box's timer.
 
-The database is built as a staging copy and swapped in only when every step
-has finished, so the portal and the label tool always read a complete one,
-and a failed run leaves the previous database in place. Slow steps (voice
-detection, speaker embeddings) are cached by audio content next to it. Runs
-share the staging copy, so a run waits for any other to finish (the hourly
-one and one started by hand used to overlap and break each other).
+Every run builds a complete new database from raw in a scratch directory
+(a tmpfs in the container), then brings the real one up to date in a single
+transaction that changes only the rows that differ. So the portal and the
+label tool always read a complete database, a failed run leaves the previous
+one in place, and a run with nothing new writes almost nothing to disk (the
+NAS keeps snapshots, so every rewritten byte is kept many times). A schema
+change replaces the changed table inside the same transaction. Deleting
+the database is always safe: the next run fills a new one from raw.
+
+Slow steps (voice detection, speaker embeddings) are cached by audio content
+next to the database. A run waits for any other to finish (the hourly one and
+one started by hand used to overlap and break each other).
 """
 
 import fcntl
 import os
 import sqlite3
 import sys
+import tempfile
+from collections import Counter
 from pathlib import Path
 
 from hearsay import conversations, people, speakers
@@ -46,7 +54,8 @@ def run(raw_dir: Path, db_path: Path, audio_dir: Path, labels_dir: Path, model_d
         transcripts_dir: Path, imports_dir: Path, stream_dir: Path, affect_model_dir: Path) -> None:
     lock = open(db_path.with_name("reprocess.lock"), "w")
     fcntl.flock(lock, fcntl.LOCK_EX)
-    staging = db_path.with_name(db_path.name + ".building")
+    scratch = tempfile.TemporaryDirectory(prefix="hearsay-reprocess-")
+    staging = Path(scratch.name) / db_path.name
     cache = Cache(db_path.parent / "cache.sqlite")
     try:
         report(f"Rebuilt from {raw_dir}:", rebuild(raw_dir, staging))
@@ -65,13 +74,70 @@ def run(raw_dir: Path, db_path: Path, audio_dir: Path, labels_dir: Path, model_d
         report("Anonymous speakers and names:", group_people(staging))
         report("Media hints, learned from the operator's tags:", score_media(staging))
         record_run(staging)
-        os.replace(staging, db_path)
+        report(f"Updated {db_path} in place:", update_in_place(staging, db_path))
     finally:
         cache.close()
-        staging.unlink(missing_ok=True)
+        scratch.cleanup()
     # From the database now in place, so the stream always matches it.
     report(f"Utterance stream in {stream_dir}:", write_stream(db_path, stream_dir))
-    print(f"Replaced {db_path}; removed {remove_stale_wavs(audio_dir, db_path)} stale WAV(s).")
+    print(f"Removed {remove_stale_wavs(audio_dir, db_path)} stale WAV(s).")
+
+
+def schema(db: sqlite3.Connection, name: str) -> dict[str, tuple[str, str]]:
+    return {row[0]: (row[1], row[2]) for row in db.execute(
+        f"SELECT name, type, sql FROM {name}.sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'")}
+
+
+def update_in_place(built: Path, db_path: Path) -> dict:
+    """Make db_path hold exactly what built holds, in one transaction.
+
+    Rows are compared whole, as a multiset per table (some tables have no
+    key), and only the differences are written, so an unchanged database
+    gets no writes at all. A table or index whose definition changed is
+    dropped and recreated. Nothing reads the live database in row order.
+    """
+    counts = {"tables_recreated": 0, "rows_deleted": 0, "rows_inserted": 0}
+    db = sqlite3.connect(db_path, isolation_level=None)
+    try:
+        db.execute("ATTACH DATABASE ? AS built", (str(built),))
+        db.execute("BEGIN IMMEDIATE")
+        new, old = schema(db, "built"), schema(db, "main")
+        for name, (kind, sql) in old.items():
+            if new.get(name) != (kind, sql):
+                # Dropping a table drops its indexes too, hence IF EXISTS.
+                db.execute(f'DROP {kind.upper()} IF EXISTS main."{name}"')
+        for name, (kind, sql) in new.items():
+            if kind == "table" and old.get(name) != (kind, sql):
+                db.execute(sql)
+                counts["tables_recreated"] += 1
+        for name, (kind, _) in new.items():
+            if kind != "table":
+                continue
+            wanted = Counter(db.execute(f'SELECT * FROM built."{name}"'))
+            stale = []
+            for rowid, *row in db.execute(f'SELECT rowid, * FROM main."{name}"').fetchall():
+                row = tuple(row)
+                if wanted[row] > 0:
+                    wanted[row] -= 1
+                else:
+                    stale.append((rowid,))
+            # Deletes first, so a changed row never collides with its old key.
+            db.executemany(f'DELETE FROM main."{name}" WHERE rowid = ?', stale)
+            inserts = list(wanted.elements())
+            if inserts:
+                marks = ",".join("?" * len(inserts[0]))
+                db.executemany(f'INSERT INTO main."{name}" VALUES ({marks})', inserts)
+            counts["rows_deleted"] += len(stale)
+            counts["rows_inserted"] += len(inserts)
+        # Indexes last: recreated if changed, or dropped with their table.
+        present = schema(db, "main")
+        for name, (kind, sql) in new.items():
+            if kind != "table" and name not in present:
+                db.execute(sql)
+        db.execute("COMMIT")
+    finally:
+        db.close()
+    return counts
 
 
 def record_run(db_path: Path) -> None:

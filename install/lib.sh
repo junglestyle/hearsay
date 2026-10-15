@@ -2,9 +2,12 @@
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# NAS layout (TrueNAS SCALE, pool "storage").
-NAS_POOL_DATASET="storage/hearsay"
-NAS_ROOT="/mnt/storage/hearsay"
+# NAS layout (TrueNAS SCALE, NVMe pool "fast"). Hearsay lived on the
+# spinning pool "storage" until 2026-10; install/nas.sh moves it from there.
+NAS_POOL_DATASET="fast/hearsay"
+NAS_ROOT="/mnt/fast/hearsay"
+NAS_OLD_DATASET="storage/hearsay"
+NAS_REPO_DIR="/mnt/fast/repos/hearsay"
 NAS_CONFIG="$NAS_ROOT/config"
 NAS_RAW="$NAS_ROOT/raw"
 NAS_DB="$NAS_ROOT/db"
@@ -12,15 +15,14 @@ NAS_AUDIO="$NAS_ROOT/audio"
 NAS_LABELS="$NAS_ROOT/labels"
 NAS_TRANSCRIPTS="$NAS_ROOT/transcripts"
 NAS_IMPORTS="$NAS_ROOT/imports"
-NAS_LOGS="$NAS_ROOT/logs"
 NAS_STREAM="$NAS_ROOT/stream"
-# Idea Machine's, not Hearsay's: it writes vocab.json there for the portal's Words page.
-IDEAMACHINE_VOCAB_DIR="/mnt/storage/ideamachine/vocab"
-NAS_RECEIVER_ENV="$NAS_CONFIG/receiver.env"
-NAS_TUNNEL_ENV="$NAS_CONFIG/tunnel.env"
+# Idea Machine's, not Hearsay's: it writes vocab.json there for the portal's
+# Words page. It moves to the fast pool on Idea Machine's own schedule, so
+# install/nas.sh picks whichever exists.
+IDEAMACHINE_VOCAB_FAST="/mnt/fast/ideamachine/vocab"
+IDEAMACHINE_VOCAB_OLD="/mnt/storage/ideamachine/vocab"
 NAS_PORTAL_ENV="$NAS_CONFIG/portal.env"
 NAS_CAPTURE_ENV="$NAS_CONFIG/capture.env"
-NAS_RECEIVER_PORT=8787
 NAS_PORTAL_PORT=8788
 NAS_CAPTURE_PORT=8789
 APPS_UID=568

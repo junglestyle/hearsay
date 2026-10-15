@@ -1,7 +1,8 @@
 # Hearsay
 
 Hearsay turns captured audio into attributed utterances: who said what, when.
-It ingests Omi pendant data, assembles audio, transcribes, diarizes, and
+It ingests audio from the pendant (through the iPhone app) and the Mac,
+assembles it, transcribes, diarizes, and
 identifies speakers (me / anonymous cluster / tagged person).
 
 Hearsay does NOT categorize, summarize, extract ideas, or interpret content.
@@ -11,7 +12,7 @@ understanding what was said, it is out of scope.
 ## Output contract
 
 The product of Hearsay is a stream of utterance records (`hearsay/stream.py`,
-written to `/mnt/storage/hearsay/stream/` after every reprocess): one JSONL
+written to `/mnt/fast/hearsay/stream/` after every reprocess): one JSONL
 file per conversation plus `index.json`. Each utterance has conversation_id,
 utterance_id, start/end (UTC), speaker {kind, name, label}, text,
 text_confidence (Parakeet's token probabilities, each word its least
@@ -78,14 +79,18 @@ Guarantees consumers rely on (Idea Machine, `docs/ROADMAP.md` §3 there):
   and Tailscale tailnet: the NAS, the dev box (which has the GPU), the
   operator's Mac laptop, and the operator's phone. Audio, including non-owner
   audio, may move between them.
-  It is never exposed on the public internet (the Cloudflare tunnel carries
-  only the receiver) and never goes to third-party services or downstream
-  consumers.
+  It is never exposed on the public internet (nothing of Hearsay's is; the
+  Omi webhook receiver and its Cloudflare tunnel were retired in 2026-10)
+  and never goes to third-party services or downstream consumers.
 - Non-owner audio is deleted after embedding and transcription, per retention
   policy. Owner audio may be kept.
 - Speaker embeddings are retained indefinitely; tagging and merging must be
   retroactive.
 - All processing must be re-runnable from raw payloads.
+- A reprocess with nothing new writes almost nothing: the database is updated
+  in place (only changed rows), and a WAV is written only when its bytes
+  change. Hearsay's data is on the NAS's NVMe pool, snapshotted nightly, so
+  every rewritten byte is kept many times.
 - Data directories and secrets are never committed.
 
 ## Current slice
@@ -214,7 +219,7 @@ already contain multiple real cases that require the generalization.
 ## Installation
 
 All installation and deployment lives in `install/`, one script per target
-(e.g. `install/dev.sh`, `install/nas.sh`, `install/tunnel.sh`). Shared helpers
+(e.g. `install/dev.sh`, `install/nas.sh`, `install/gpu.sh`). Shared helpers
 go in `install/lib.sh`. No install scripts live outside `install/`.
 
 `docs/install.md` is the orientation doc for installation (`README.md` is

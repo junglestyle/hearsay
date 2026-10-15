@@ -1,43 +1,34 @@
 name: hearsay
 
-services:
-  receiver:
-    build: ..
-    image: hearsay
-    container_name: hearsay
-    user: "568:568"
-    env_file: /mnt/storage/hearsay/config/receiver.env
-    environment:
-      HEARSAY_RAW_DIR: /data/raw
-    volumes:
-      - /mnt/storage/hearsay/raw:/data/raw
-    # Loopback only: the public path is Cloudflare Tunnel (install/tunnel.sh).
-    ports:
-      - "127.0.0.1:8787:8000"
-    restart: unless-stopped
+# Every service logs to the host journal (journalctl CONTAINER_NAME=...), so
+# nothing writes a log file on either pool.
+x-logging: &logging
+  driver: journald
 
+services:
   # Web portal for naming speakers. Reachable on the LAN and tailnet only:
-  # never 0.0.0.0 (the NAS has a public IPv6 address), and never add it to
-  # the Cloudflare tunnel. install/nas.sh exports the two addresses; the
-  # loopback defaults only apply when compose runs without them.
+  # never 0.0.0.0 (the NAS has a public IPv6 address), and nothing of
+  # Hearsay's is on the public internet. install/nas.sh exports the two
+  # addresses; the loopback defaults only apply when compose runs without them.
   portal:
     image: hearsay
     pull_policy: never
     container_name: hearsay-portal
+    logging: *logging
     user: "568:568"
     # capture.env too: the iPhone app logs in with the capture token.
     env_file:
-      - /mnt/storage/hearsay/config/portal.env
-      - /mnt/storage/hearsay/config/capture.env
+      - /mnt/fast/hearsay/config/portal.env
+      - /mnt/fast/hearsay/config/capture.env
     environment:
       HEARSAY_DB: /data/db/hearsay.sqlite
       HEARSAY_AUDIO_DIR: /data/audio
       HEARSAY_LABELS_DIR: /data/labels
       HEARSAY_VOCAB_FILE: /data/vocab/vocab.json
     volumes:
-      - /mnt/storage/hearsay/db:/data/db:ro
-      - /mnt/storage/hearsay/audio:/data/audio:ro
-      - /mnt/storage/hearsay/labels:/data/labels
+      - /mnt/fast/hearsay/db:/data/db:ro
+      - /mnt/fast/hearsay/audio:/data/audio:ro
+      - /mnt/fast/hearsay/labels:/data/labels
       # Words Idea Machine writes for the Words page (hearsay/words.py); read only.
       - ${IDEAMACHINE_VOCAB_DIR:-/mnt/storage/ideamachine/vocab}:/data/vocab:ro
     ports:
@@ -46,19 +37,20 @@ services:
     command: ["uvicorn", "--factory", "hearsay.portal:app_from_env", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
 
-  # Uploads from the iPhone app (ios/): pendant audio, so tailnet only.
-  # Never the LAN (the phone reaches the NAS over the tailnet from
-  # anywhere), never 0.0.0.0, never the Cloudflare tunnel.
+  # Uploads from the iPhone app (ios/) and the Mac (mac/): audio, so tailnet
+  # only. Never the LAN (the phone reaches the NAS over the tailnet from
+  # anywhere), never 0.0.0.0, never the public internet.
   capture:
+    build: ..
     image: hearsay
-    pull_policy: never
     container_name: hearsay-capture
+    logging: *logging
     user: "568:568"
-    env_file: /mnt/storage/hearsay/config/capture.env
+    env_file: /mnt/fast/hearsay/config/capture.env
     environment:
       HEARSAY_RAW_DIR: /data/raw
     volumes:
-      - /mnt/storage/hearsay/raw:/data/raw
+      - /mnt/fast/hearsay/raw:/data/raw
     ports:
       - "${HEARSAY_TAILNET_IP:-127.0.0.2}:8789:8000"
     command: ["uvicorn", "--factory", "hearsay.receiver:capture_app_from_env", "--host", "0.0.0.0", "--port", "8000",
@@ -76,8 +68,13 @@ services:
         HEARSAY_COMMIT: ${HEARSAY_COMMIT:-unknown}
     image: hearsay-worker
     profiles: [tools]
+    logging: *logging
     user: "568:568"
     network_mode: none
+    # The new database is built here and then copied into the real one row by
+    # row (hearsay/reprocess.py), so building it costs no disk writes.
+    tmpfs:
+      - /tmp
     environment:
       HEARSAY_RAW_DIR: /data/raw
       HEARSAY_DB: /data/db/hearsay.sqlite
@@ -87,13 +84,13 @@ services:
       HEARSAY_IMPORTS_DIR: /data/imports
       HEARSAY_STREAM_DIR: /data/stream
     volumes:
-      - /mnt/storage/hearsay/raw:/data/raw:ro
-      - /mnt/storage/hearsay/db:/data/db
-      - /mnt/storage/hearsay/audio:/data/audio
-      - /mnt/storage/hearsay/labels:/data/labels:ro
-      - /mnt/storage/hearsay/transcripts:/data/transcripts:ro
-      - /mnt/storage/hearsay/imports:/data/imports:ro
-      - /mnt/storage/hearsay/stream:/data/stream
+      - /mnt/fast/hearsay/raw:/data/raw:ro
+      - /mnt/fast/hearsay/db:/data/db
+      - /mnt/fast/hearsay/audio:/data/audio
+      - /mnt/fast/hearsay/labels:/data/labels:ro
+      - /mnt/fast/hearsay/transcripts:/data/transcripts:ro
+      - /mnt/fast/hearsay/imports:/data/imports:ro
+      - /mnt/fast/hearsay/stream:/data/stream
     command: ["python", "-m", "hearsay.reprocess"]
 
   # One-shot: the test suite, including the check that every real capture reprocesses.
@@ -105,6 +102,7 @@ services:
         HEARSAY_COMMIT: ${HEARSAY_COMMIT:-unknown}
     image: hearsay-test
     profiles: [tools]
+    logging: *logging
     user: "568:568"
     network_mode: none
     environment:
@@ -112,7 +110,7 @@ services:
       HEARSAY_CHECK_TRANSCRIPTS_DIR: /data/transcripts
       HEARSAY_CHECK_IMPORTS_DIR: /data/imports
     volumes:
-      - /mnt/storage/hearsay/raw:/data/raw:ro
-      - /mnt/storage/hearsay/transcripts:/data/transcripts:ro
-      - /mnt/storage/hearsay/imports:/data/imports:ro
+      - /mnt/fast/hearsay/raw:/data/raw:ro
+      - /mnt/fast/hearsay/transcripts:/data/transcripts:ro
+      - /mnt/fast/hearsay/imports:/data/imports:ro
     command: ["pytest", "-q", "-p", "no:cacheprovider", "/tests"]

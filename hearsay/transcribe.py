@@ -34,10 +34,10 @@ from pathlib import Path
 from hearsay.words import boosted
 
 NAS = "nas"
-DB = "/mnt/storage/hearsay/db/hearsay.sqlite"
-AUDIO_DIR = "/mnt/storage/hearsay/audio"
-TRANSCRIPTS_DIR = "/mnt/storage/hearsay/transcripts"
-WORDS = "/mnt/storage/hearsay/labels/words.json"
+DB = "/mnt/fast/hearsay/db/hearsay.sqlite"
+AUDIO_DIR = "/mnt/fast/hearsay/audio"
+TRANSCRIPTS_DIR = "/mnt/fast/hearsay/transcripts"
+WORDS = "/mnt/fast/hearsay/labels/words.json"
 DEVICE = "cuda"
 SETTINGS = {
     # Detects the language itself; it has no setting to force one.

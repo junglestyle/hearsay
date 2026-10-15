@@ -53,9 +53,10 @@ flowchart LR
 - **Precision over coverage in speaker attribution.** I tune the owner and not-owner voice thresholds
   against segments I've labeled by ear. Disagreements get re-heard blind, and a report shows
   precision at each threshold. A turn that can't be called stays unlabeled rather than guessed.
-- **Everything rebuilds from raw.** Webhook and upload payloads are written to disk byte for byte
-  before any parsing. Every hour the whole database is rebuilt from them into a staging copy, which
-  is swapped in only when it's complete. Slow steps are cached by audio content.
+- **Everything rebuilds from raw.** Uploads are written to disk byte for byte before any parsing.
+  Every hour the whole database is rebuilt from them in memory, then the live one is updated in one
+  transaction that writes only the rows that changed, so a quiet hour writes almost nothing. Slow
+  steps are cached by audio content.
 - **A real contract for consumers.** The stream has a format version and atomic writes. Each file
   carries a content-hash revision so a reader can detect a race. A separate transcript revision says
   when utterance ids get renumbered, and there's an append-only forget list. Names apply
@@ -70,8 +71,7 @@ flowchart LR
 ## Stack
 
 Python 3.12, FastAPI, SQLite, NVIDIA Parakeet (NeMo), pyannote, SpeechBrain, Silero VAD, Swift
-(iOS and macOS), Docker on TrueNAS, Tailscale, Cloudflare Tunnel. 45 tests on synthetic fixtures,
-run in CI.
+(iOS and macOS), Docker on TrueNAS (NVMe pool), Tailscale. Tests on synthetic fixtures, run in CI.
 
 ## Running it
 
@@ -81,5 +81,7 @@ operating guide is in [docs/install.md](docs/install.md), and the build history 
 
 ## Status
 
-Under active development. The current work is the owner's tone of voice (slice 16) and place-based naming hints
-(slice 14).
+Under active development. The current work is how the owner holds a turn (slice 17) and place-based
+naming hints (slice 14). Hearsay moved from the NAS's spinning pool to its NVMe pool in October
+2026, and Omi's cloud webhooks (and the public tunnel they needed) were retired: all capture now
+comes over the tailnet.
