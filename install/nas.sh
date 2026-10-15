@@ -132,12 +132,13 @@ export IDEAMACHINE_VOCAB_DIR
 tunnel_env="$NAS_CONFIG/tunnel.env"
 if [ -f "$tunnel_env" ]; then
     host="$(env_get "$tunnel_env" HEARSAY_PUBLIC_HOST)"
+    record="${host:-the receiver hostname}"
     say "Delete the Cloudflare tunnel"
     # Manual: needs the operator's Cloudflare account.
     cat <<EOF
 The tunnel's container is gone. In the Cloudflare dashboard:
   1. Zero Trust -> Networks -> Tunnels: delete the tunnel named hearsay.
-  2. DNS for your zone: delete the record for ${host:-the receiver's hostname}.
+  2. DNS for your zone: delete the record for $record.
 In the Omi app, you can also turn off the three webhooks.
 EOF
     confirm "Deleted both in Cloudflare?"
