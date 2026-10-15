@@ -29,8 +29,8 @@ services:
       - /mnt/fast/hearsay/db:/data/db:ro
       - /mnt/fast/hearsay/audio:/data/audio:ro
       - /mnt/fast/hearsay/labels:/data/labels
-      # Words Idea Machine writes for the Words page (hearsay/words.py); read only.
-      - ${IDEAMACHINE_VOCAB_DIR:-/mnt/storage/ideamachine/vocab}:/data/vocab:ro
+      # Idea Machine's vocab folder is mounted by compose.vocab.yaml, which
+      # install/nas.sh adds only when the folder exists.
     ports:
       - "${HEARSAY_LAN_IP:-127.0.0.1}:8788:8000"
       - "${HEARSAY_TAILNET_IP:-127.0.0.2}:8788:8000"

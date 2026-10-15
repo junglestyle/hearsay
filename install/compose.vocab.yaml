@@ -1,0 +1,13 @@
+# Idea Machine's vocab folder, for the portal's Words page (hearsay/words.py),
+# read-only. Idea Machine owns it. A separate file so install/nas.sh can leave
+# the mount out while the folder doesn't exist: anything that created it
+# would leave a plain directory where Idea Machine's dataset mounts.
+services:
+  portal:
+    volumes:
+      - type: bind
+        source: /mnt/fast/ideamachine/vocab
+        target: /data/vocab
+        read_only: true
+        bind:
+          create_host_path: false

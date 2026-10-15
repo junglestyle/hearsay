@@ -83,5 +83,5 @@ operating guide is in [docs/install.md](docs/install.md), and the build history 
 
 Under active development. The current work is how the owner holds a turn (slice 17) and place-based
 naming hints (slice 14). Hearsay moved from the NAS's spinning pool to its NVMe pool in October
-2026, and Omi's cloud webhooks (and the public tunnel they needed) were retired: all capture now
+2026 (as did Idea Machine), and Omi's cloud webhooks (and the public tunnel they needed) were retired: all capture now
 comes over the tailnet.

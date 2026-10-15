@@ -17,7 +17,8 @@ Retired 2026-10: Omi's last payload was 2026-09-30, after slice 9 replaced
 its app. The receiver and the tunnel are gone; the raw payloads stay and are
 still parsed. Nothing of Hearsay's is on the public internet now. In the
 same change Hearsay moved to the NAS's NVMe pool, and reprocess stopped
-rewriting unchanged audio and the whole database every hour.
+rewriting unchanged audio and the whole database every hour. Idea
+Machine moved too; the portal reads its vocab from `/mnt/fast/ideamachine`.
 
 ## 2. Parse from reality
 

@@ -68,8 +68,9 @@ Before running it:
 It also retires Omi's webhook receiver: it removes the receiver and
 Cloudflare tunnel containers, asks you to delete the tunnel and its DNS
 record in Cloudflare, waits until the hostname stops resolving, and deletes
-the tunnel token and webhook secret. Idea Machine reads
-`/mnt/fast/hearsay/stream` once it exists. When you've checked Hearsay works
+the tunnel token and webhook secret. The stream moves with the other
+datasets, so Idea Machine finds every conversation it had; then switch it
+over with `sudo /mnt/fast/repos/ideamachine/install/nas.sh`. When you've checked Hearsay works
 from `fast`, destroy the old copy with the command `nas.sh` prints
 (`sudo zfs destroy -r storage/hearsay`).
 
@@ -255,10 +256,9 @@ The portal's Words page lists words transcription leans toward (names,
 jargon). Type them one per line and save a draft; it shows what would change
 and waits as long as you like. Update commits them together with the words
 you approved in Lattice, which Idea Machine writes to
-`vocab.json` in its vocab folder: `/mnt/fast/ideamachine/vocab` once Idea
-Machine has moved it, `/mnt/storage/ideamachine/vocab` until then. `nas.sh`
-picks whichever exists and says which (re-run it after Idea Machine moves),
-makes the folder if Idea Machine hasn't, and the portal only reads it. Each Update re-transcribes
+`/mnt/fast/ideamachine/vocab/vocab.json`. The portal only reads it. `nas.sh`
+never creates that folder, since Idea Machine's dataset mounts there: if
+it's missing, the portal starts without it and `nas.sh` says so. Each Update re-transcribes
 every conversation on the dev box's next run, so batch your edits.
 
 Names are stored on the segments you heard, in `/mnt/fast/hearsay/labels/`,

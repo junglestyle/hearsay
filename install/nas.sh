@@ -111,23 +111,16 @@ for dir in "$NAS_LABELS" "$NAS_TRANSCRIPTS" "$NAS_IMPORTS"; do
     chmod 2770 "$dir"
 done
 
-say "Idea Machine's vocab folder"
-# The portal mounts it read-only. Idea Machine moves it to the fast pool on
-# its own schedule; re-running this script after that switches the portal over.
-# Made here only if Idea Machine hasn't yet, owned like the stream (the apps
-# group), so Docker doesn't make it root's and lock Idea Machine out.
-if [ -d "$IDEAMACHINE_VOCAB_FAST" ]; then
-    IDEAMACHINE_VOCAB_DIR="$IDEAMACHINE_VOCAB_FAST"
-    echo "using: $IDEAMACHINE_VOCAB_DIR"
-elif [ -d "$IDEAMACHINE_VOCAB_OLD" ]; then
-    IDEAMACHINE_VOCAB_DIR="$IDEAMACHINE_VOCAB_OLD"
-    echo "using: $IDEAMACHINE_VOCAB_DIR ($IDEAMACHINE_VOCAB_FAST doesn't exist yet)"
+say "Idea Machine's vocab folder $IDEAMACHINE_VOCAB_DIR"
+# The portal mounts it read-only. Never created here: Idea Machine owns it,
+# and a directory made before its dataset would block the dataset's mount.
+if [ -d "$IDEAMACHINE_VOCAB_DIR" ]; then
+    COMPOSE+=(-f "$REPO_DIR/install/compose.vocab.yaml")
+    echo "mounted in the portal"
 else
-    IDEAMACHINE_VOCAB_DIR="$IDEAMACHINE_VOCAB_OLD"
-    install -d -o "$APPS_UID" -g "$APPS_GID" -m 2770 "$IDEAMACHINE_VOCAB_DIR"
-    echo "created: $IDEAMACHINE_VOCAB_DIR (Idea Machine writes vocab.json there)"
+    echo "WARNING: missing, so the portal starts without it (the Words page shows no"
+    echo "words from Lattice). Install Idea Machine, then re-run this script."
 fi
-export IDEAMACHINE_VOCAB_DIR
 
 tunnel_env="$NAS_CONFIG/tunnel.env"
 if [ -f "$tunnel_env" ]; then
@@ -214,7 +207,7 @@ say "Hourly reprocess (TrueNAS cron job)"
 # Output goes to the journal, not a file on either pool. The middleware
 # appends its own "> /dev/null 2> /dev/null" to the command, so the pipe
 # sits inside an outer subshell.
-REPROCESS_CMD="( flock -n /run/hearsay-reprocess.lock ${COMPOSE[*]} run --rm -T reprocess </dev/null 2>&1 | logger -t hearsay-reprocess )"
+REPROCESS_CMD="( flock -n /run/hearsay-reprocess.lock docker compose -f $REPO_DIR/install/compose.yaml run --rm -T reprocess </dev/null 2>&1 | logger -t hearsay-reprocess )"
 cron_payload="$(python3 -c '
 import json, sys
 print(json.dumps({"user": "root", "command": sys.argv[1], "description": "hearsay reprocess",
@@ -258,6 +251,9 @@ Capture receiver, for the iPhone app (install/ios.sh on the Mac):
 EOF
 if zfs list -H -o name "$NAS_OLD_DATASET" >/dev/null 2>&1; then
     cat <<EOF
+
+Idea Machine reads the stream from $NAS_STREAM once you re-run its install:
+  sudo /mnt/fast/repos/ideamachine/install/nas.sh
 
 The old copy is still on the storage pool, read-only. Once you've confirmed
 Hearsay works from $NAS_ROOT, destroy it (its old repo clone and

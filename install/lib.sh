@@ -17,10 +17,8 @@ NAS_TRANSCRIPTS="$NAS_ROOT/transcripts"
 NAS_IMPORTS="$NAS_ROOT/imports"
 NAS_STREAM="$NAS_ROOT/stream"
 # Idea Machine's, not Hearsay's: it writes vocab.json there for the portal's
-# Words page. It moves to the fast pool on Idea Machine's own schedule, so
-# install/nas.sh picks whichever exists.
-IDEAMACHINE_VOCAB_FAST="/mnt/fast/ideamachine/vocab"
-IDEAMACHINE_VOCAB_OLD="/mnt/storage/ideamachine/vocab"
+# Words page. Hearsay never creates it (install/compose.vocab.yaml).
+IDEAMACHINE_VOCAB_DIR="/mnt/fast/ideamachine/vocab"
 NAS_PORTAL_ENV="$NAS_CONFIG/portal.env"
 NAS_CAPTURE_ENV="$NAS_CONFIG/capture.env"
 NAS_PORTAL_PORT=8788
